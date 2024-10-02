@@ -2,6 +2,7 @@
 #include <SDL2/SDL_pixels.h>
 #include <SDL2/SDL_surface.h>
 
+#include <SDL_image.h>
 #include <SDL_keycode.h>
 #include <SDL_rect.h>
 #include <SDL_render.h>
@@ -9,6 +10,10 @@
 
 #include <math.h>
 #include <stdbool.h>
+
+SDL_Texture* keycap_texture = NULL;
+int keycap_width = -1;
+int keycap_height = -1;
 
 bool init() {
   if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -21,6 +26,8 @@ void update(float dT) {
 }
 
 void render(SDL_Renderer* renderer) {
+  SDL_Rect dst = { 0, 0, keycap_width, keycap_height };
+  SDL_RenderCopy(renderer, keycap_texture, NULL, &dst);
 }
 
 void loop(SDL_Renderer* renderer) {
@@ -44,13 +51,16 @@ void loop(SDL_Renderer* renderer) {
           break;
         case SDL_KEYDOWN:
           switch (event.key.keysym.sym) {
-              case SDLK_q:
               case SDLK_ESCAPE:
                   running = false;
                   break;
               default:
+                  printf("Pressed: %d\n", event.key.keysym.scancode);
                   break;
           }
+          break;
+        case SDL_KEYUP:
+          printf("Pressed: %d\n", event.key.keysym.scancode);
           break;
         default:
           break;
@@ -78,7 +88,10 @@ void loop(SDL_Renderer* renderer) {
 }
 
 int main(int argc, char** argv) {
-  init();
+  if (!init()) {
+    perror("Failed to initialize\n");
+    return EXIT_FAILURE;
+  }
 
   SDL_Window* window = NULL;
   SDL_Renderer* renderer = NULL;
@@ -87,7 +100,15 @@ int main(int argc, char** argv) {
   int height = 1280;
   SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
 
+  SDL_Surface* keycap_surface = IMG_Load("assets/keycap.png");
+  keycap_width = keycap_surface->w;
+  keycap_height = keycap_surface->h;
+  keycap_texture = SDL_CreateTextureFromSurface(renderer, keycap_surface);
+
   loop(renderer);
+
+  SDL_DestroyTexture(keycap_texture);
+  SDL_FreeSurface(keycap_surface);
 
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
