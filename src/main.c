@@ -1,81 +1,22 @@
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_pixels.h>
-#include <SDL2/SDL_surface.h>
+#include <SDL2/SDL_image.h>
+#include <X11/Xlib.h>
+#include <X11/extensions/XInput2.h>
 
-#include <SDL_image.h>
-#include <SDL_keycode.h>
-#include <SDL_rect.h>
-#include <SDL_render.h>
-#include <SDL_scancode.h>
-#include <SDL_timer.h>
-
-#include <math.h>
-#include <stdbool.h>
+#include "keyboard.h"
 
 #define ARRAY_LENGTH(x) (sizeof(x) / sizeof((x)[0]))
+#define MAX(a, b) (((a)>(b))?(a):(b))
 
-struct Key {
-  const float x;
-  const float y;
-  const float rot;
-  bool pressed;
-} Key;
+#define KEY_1U_PX 64
 
-struct Key keyboard[] = {
-  {0, 0, 0},
-  {1, 0, 0},
-  {0, 1, 0},
-  {1, 1, 0},
-};
-
-const int scancode_keyboard_lookup[256] = {
-  -1, -1, -1, -1,  2, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1,  0, -1,  3, -1,
-  -1, -1,  1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1,
-};
+Display* display = NULL;
 
 SDL_Texture* keycap_texture = NULL;
 int keycap_width = -1;
 int keycap_height = -1;
 
-bool init() {
-  if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-    return false;
-  }
-  return true;
-}
-
-void update(float dT) {
-}
+int xi_opcode;
 
 void render(SDL_Renderer* renderer) {
   struct Key* k = NULL;
@@ -85,28 +26,58 @@ void render(SDL_Renderer* renderer) {
 
   for (int i = 0; i < ARRAY_LENGTH(keyboard); i++) {
     k = &keyboard[i];
-    int x = keycap_width * k->x;
-    int y = keycap_height * k->y;
+    int x = KEY_1U_PX * k->x;
+    int y = KEY_1U_PX * k->y;
+    int keycap_width = KEY_1U_PX * MAX(k->width, k->width2);
+    int keycap_height = KEY_1U_PX * MAX(k->height, k->height2);
+    SDL_Rect src = { 0, KEY_1U_PX * ((int)(k->width * 4) - 4), keycap_width, keycap_height };
     SDL_Rect dst = { x, y, keycap_width, keycap_height };
-    SDL_RenderCopy(renderer, keycap_texture, NULL, &dst);
+    if (k->width == 1.25 && k->width2 == 1.5 && k->height == 2 && k->height2 == 1) {
+      // iso enter
+      src.x = 2 * KEY_1U_PX;
+      src.y = 0;
+      dst.x -= 0.25 * KEY_1U_PX;
+    }
+    SDL_RenderCopy(renderer, keycap_texture, &src, &dst);
     if (k->pressed) {
-        SDL_RenderFillRect(renderer, &dst);
+      SDL_RenderFillRect(renderer, &dst);
     }
   }
 }
 
 void loop(SDL_Renderer* renderer) {
   bool running = true;
-  Uint32 lastUpdate = SDL_GetTicks();
+  SDL_Event event;
+
+  XIEventMask mask[2];
+  XIEventMask *m;
+  Window win;
+  int rc;
+
+  setvbuf(stdout, NULL, _IOLBF, 0);
+
+  win = DefaultRootWindow(display);
+
+  /* Select for motion events */
+  m = &mask[0];
+  m->deviceid = XIAllDevices;
+  m->mask_len = XIMaskLen(XI_LASTEVENT);
+  m->mask = calloc(m->mask_len, sizeof(char));
+
+  m = &mask[1];
+  m->deviceid = XIAllMasterDevices;
+  m->mask_len = XIMaskLen(XI_LASTEVENT);
+  m->mask = calloc(m->mask_len, sizeof(char));
+  XISetMask(m->mask, XI_RawKeyPress);
+  XISetMask(m->mask, XI_RawKeyRelease);
+
+  XISelectEvents(display, win, &mask[0], 2);
+  XSync(display, False);
+
+  free(mask[0].mask);
+  free(mask[1].mask);
 
   while (running) {
-    // start frame timing
-    Uint64 start = SDL_GetPerformanceCounter();
-
-    SDL_Event event;
-    int scancode = -1;
-    int index = -1;
-
     SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
     SDL_RenderClear(renderer);
 
@@ -116,27 +87,32 @@ void loop(SDL_Renderer* renderer) {
         case SDL_QUIT:
           running = false;
           break;
-        case SDL_KEYDOWN:
-          scancode = event.key.keysym.scancode;
-          switch (scancode) {
-              case SDL_SCANCODE_ESCAPE:
-                  running = false;
-                  break;
-              default:
-                  index = scancode_keyboard_lookup[scancode];
-                  printf("Down: %d; index: %d\n", scancode, index);
-                  if (index >= 0) {
-                    keyboard[index].pressed = true;
-                  }
-                  break;
-          }
+        default:
           break;
-        case SDL_KEYUP:
-          scancode = event.key.keysym.scancode;
-          index = scancode_keyboard_lookup[scancode];
-          printf("Up: %d; index: %d\n", scancode, index);
+      }
+    }
+
+    int index = -1;
+
+    XEvent ev;
+    XGenericEventCookie *cookie = (XGenericEventCookie*)&ev.xcookie;
+    // blocks when no events in queue, thats why no window shown
+    // until first key press, to be fixed
+    XNextEvent(display, (XEvent*)&ev);
+
+    if (XGetEventData(display, cookie) &&
+        cookie->type == GenericEvent &&
+        cookie->extension == xi_opcode)
+    {
+      XIRawEvent* raw_event = cookie->data;
+      switch (cookie->evtype)
+      {
+        case XI_RawKeyPress:
+        case XI_RawKeyRelease:
+          printf("keycode: %d\n", raw_event->detail);
+          index = keycode_keyboard_lookup[raw_event->detail];
           if (index >= 0) {
-            keyboard[index].pressed = false;
+            keyboard[index].pressed = cookie->evtype == XI_RawKeyPress;
           }
           break;
         default:
@@ -144,31 +120,40 @@ void loop(SDL_Renderer* renderer) {
       }
     }
 
-    Uint32 current = SDL_GetTicks();
-    float dT = (current - lastUpdate) / 1000.0f;
-
-    update(dT);
-
-    lastUpdate = current;
+    XFreeEventData(display, cookie);
 
     render(renderer);
-
-    // end frame timing
-    Uint64 end = SDL_GetPerformanceCounter();
-    float elapsed_ms = (end - start) / (float) SDL_GetPerformanceFrequency() * 1000.0f;
-
-    // cap to ~60 FPS
-    SDL_Delay(floor(16.666f - elapsed_ms));
-
     SDL_RenderPresent(renderer);
   }
+
+  XDestroyWindow(display, win);
+
+  XSync(display, False);
+  XCloseDisplay(display);
 }
 
 int main(int argc, char** argv) {
-  if (!init()) {
-    perror("Failed to initialize\n");
-    return EXIT_FAILURE;
+  int event, error;
+
+  display = XOpenDisplay(NULL);
+
+  if (display == NULL) {
+    fprintf(stderr, "Unable to connect to X server\n");
+    goto out;
   }
+
+  if (!XQueryExtension(display, "XInputExtension", &xi_opcode, &event, &error)) {
+    printf("X Input extension not available.\n");
+    goto out;
+  }
+
+  if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    printf("Failed to inidialize SDL\n");
+    goto out;
+  }
+
+  SDL_EventState(SDL_KEYDOWN, SDL_IGNORE);
+  SDL_EventState(SDL_KEYUP, SDL_IGNORE);
 
   SDL_Window* window = NULL;
   SDL_Renderer* renderer = NULL;
@@ -176,8 +161,9 @@ int main(int argc, char** argv) {
   int width = 960;
   int height = 320;
   SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
+  SDL_SetWindowBordered(window, SDL_FALSE);
 
-  SDL_Surface* keycap_surface = IMG_Load("assets/keycap.png");
+  SDL_Surface* keycap_surface = IMG_Load("assets/keycaps.png");
   keycap_width = keycap_surface->w;
   keycap_height = keycap_surface->h;
   keycap_texture = SDL_CreateTextureFromSurface(renderer, keycap_surface);
@@ -192,4 +178,8 @@ int main(int argc, char** argv) {
   SDL_Quit();
 
   return EXIT_SUCCESS;
+out:
+  if (display)
+      XCloseDisplay(display);
+  return EXIT_FAILURE;
 }

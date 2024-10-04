@@ -5,6 +5,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(SDL2 REQUIRED)
 find_package(SDL2_image REQUIRED)
+find_package(X11 REQUIRED)
 
 add_executable(${CMAKE_PROJECT_NAME}
   src/main.c
@@ -13,6 +14,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
   SDL2::SDL2
   SDL2_image::SDL2_image
   m
+  X11::X11
+  X11::Xi
 )
 
 add_custom_command(
