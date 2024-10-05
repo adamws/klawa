@@ -1,5 +1,5 @@
 const std = @import("std");
-const keyboard = @import("keyboard.zig");
+const kle = @import("kle.zig");
 const sdl = @cImport({
     @cInclude("SDL2/SDL.h");
     @cInclude("SDL2/SDL_image.h");
@@ -18,11 +18,15 @@ var keycap_width: i32 = -1;
 var keycap_height: i32 = -1;
 var xi_opcode: i32 = 0;
 
+var keyboard: kle.Keyboard = undefined;
+var key_states: []bool = undefined;
+var keycode_keyboard_lookup = [_]i32{-1} ** 256;
+
 fn render(renderer: ?*sdl.SDL_Renderer) void {
     _ = sdl.SDL_SetRenderDrawBlendMode(renderer, sdl.SDL_BLENDMODE_BLEND);
     _ = sdl.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128);
 
-    for (keyboard.layout) |k| {
+    for (keyboard.keys, 0..) |k, index| {
         const x: c_int = @intFromFloat(KEY_1U_PX * k.x);
         const y: c_int = @intFromFloat(KEY_1U_PX * k.y);
         const width: c_int = @intFromFloat(KEY_1U_PX * @max(k.width, k.width2));
@@ -39,7 +43,7 @@ fn render(renderer: ?*sdl.SDL_Renderer) void {
         }
 
         _ = sdl.SDL_RenderCopy(renderer, keycap_texture, &src, &dst);
-        if (k.pressed) {
+        if (key_states[index]) {
             _ = sdl.SDL_RenderFillRect(renderer, &dst);
         }
     }
@@ -95,10 +99,10 @@ fn loop(renderer: ?*sdl.SDL_Renderer) void {
                 x11.XI_RawKeyPress, x11.XI_RawKeyRelease => {
                     const keycode: usize = @intCast(raw_event.detail);
                     std.debug.print("keycode: {}\n", .{keycode});
-                    const lookup: i32 = keyboard.keycode_keyboard_lookup[keycode];
+                    const lookup: i32 = keycode_keyboard_lookup[keycode];
                     if (lookup >= 0) {
                         const index: usize = @intCast(lookup);
-                        keyboard.layout[index].pressed = cookie.evtype == x11.XI_RawKeyPress;
+                        key_states[index] = cookie.evtype == x11.XI_RawKeyPress;
                     }
                 },
                 else => {},
@@ -114,6 +118,10 @@ fn loop(renderer: ?*sdl.SDL_Renderer) void {
 }
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     var event: c_int = 0;
     var err: c_int = 0;
 
@@ -140,8 +148,33 @@ pub fn main() !void {
     var window: ?*sdl.SDL_Window = null;
     var renderer: ?*sdl.SDL_Renderer = null;
 
-    const width = 960;
-    const height = 320;
+    // would be loaded from CLI provided argument or from path from config file, for now just embed
+    const kle_str = @embedFile("keyboard-layout.json");
+    const keyboard_parsed = try kle.parseFromSlice(allocator, kle_str);
+    defer keyboard_parsed.deinit();
+
+    keyboard = keyboard_parsed.value;
+    key_states = try allocator.alloc(bool, keyboard.keys.len);
+    defer allocator.free(key_states);
+    @memset(key_states, false);
+
+    // calculate key lookup
+    for (keyboard.keys, 0..) |key, index| {
+        const label = key.labels[0];
+        if (label) |l| {
+            var iter = std.mem.split(u8, l, ",");
+            while (iter.next()) |part| {
+                std.debug.print("{}: label: {s}\n", .{index, part});
+                const integer = try std.fmt.parseInt(u8, part, 10);
+                keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
+            }
+        }
+    }
+
+    const bbox = try keyboard.calculateBoundingBox();
+    const width: c_int = @intFromFloat(bbox.w * KEY_1U_PX);
+    const height: c_int = @intFromFloat(bbox.h * KEY_1U_PX);
+
     _ = sdl.SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
     defer {
         sdl.SDL_DestroyRenderer(renderer);
@@ -172,6 +205,12 @@ pub fn main() !void {
     }
 
     selectEvents(win);
+
+    // render once before loop because loop blocks when no x11 events
+    _ = sdl.SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+    _ = sdl.SDL_RenderClear(renderer);
+    render(renderer);
+    sdl.SDL_RenderPresent(renderer);
 
     loop(renderer);
 }

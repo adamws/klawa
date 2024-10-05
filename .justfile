@@ -1,5 +1,5 @@
-layout_file := "./tools/keyboard-layout.json"
+run:
+  zig build run
 
-genkeyboard:
-  . ./tools/.env/bin/activate
-  python tools/genkeyboard.py -in {{layout_file}}
+test-kle:
+  zig test src/kle.zig

@@ -13,10 +13,10 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibC();
 
-    exe.linkSystemLibrary("SDL2");
-    exe.linkSystemLibrary("SDL2_image");
-    exe.linkSystemLibrary("X11");
-    exe.linkSystemLibrary("Xi");
+    const system_libs = [_][]const u8{ "SDL2", "SDL2_image", "X11", "Xi" };
+    for (system_libs) |lib| {
+        exe.linkSystemLibrary(lib);
+    }
 
     b.installArtifact(exe);
 
@@ -40,6 +40,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    exe_unit_tests.linkLibC();
+
+    for (system_libs) |lib| {
+        exe_unit_tests.linkSystemLibrary(lib);
+    }
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
