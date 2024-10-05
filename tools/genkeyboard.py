@@ -88,7 +88,7 @@ if __name__ == "__main__":
     lookup = [-1] * 256
 
     for i, k in enumerate(keyboard.keys):
-        data = f"{k.x:6}, {k.y:6}, {0:6}, {k.width:6}, {k.height:6}, {k.width2:6}, {k.height2:6}"
+        data = f" .x={k.x:6}, .y={k.y:6}, .rot={0:6}, .width={k.width:6}, .height={k.height:6}, .width2={k.width2:6}, .height2={k.height2:6}"
         key_data.append(data)
         if labels := k.get_label(0):
             parts = list(map(int, labels.split(",")))
@@ -104,5 +104,5 @@ if __name__ == "__main__":
     width, height = calcualte_canvas_size(keyboard.keys)
     print(f"{width=}, {height=}")
 
-    template = env.get_template("keyboard.h.in")
-    template.stream(key_data=key_data, lookup=lookup).dump(str(src_path / "keyboard.h"))
+    template = env.get_template("keyboard.zig.in")
+    template.stream(key_data=key_data, lookup=lookup).dump(str(src_path / "keyboard.zig"))

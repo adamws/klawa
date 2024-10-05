@@ -1,0 +1,22 @@
+const Key = struct {
+    x: f32,
+    y: f32,
+    rot: f32,
+    width: f32,
+    height: f32,
+    width2: f32,
+    height2: f32,
+    pressed: bool = false,
+};
+
+pub var layout = [_]Key {
+{%- for item in key_data %}
+  .{ {{ item }} },
+{%- endfor %}
+};
+
+pub const keycode_keyboard_lookup = [256]i32 {
+{%- for value in lookup %}
+  {{ value }},
+{%- endfor %}
+};
