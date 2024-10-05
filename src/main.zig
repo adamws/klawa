@@ -68,7 +68,6 @@ fn selectEvents(win: x11.Window) void {
 
 fn loop(renderer: ?*sdl.SDL_Renderer) void {
     var running = true;
-
     var event: sdl.SDL_Event = undefined;
 
     while (running) {
@@ -121,17 +120,17 @@ pub fn main() !void {
     display = x11.XOpenDisplay(null);
     if (display == null) {
         std.debug.print("Unable to connect to X server\n", .{});
-        return;
+        return error.X11InitializationFailed;
     }
 
     if (x11.XQueryExtension(display.?, "XInputExtension", &xi_opcode, &event, &err) == 0) {
         std.debug.print("X Input extension not available.\n", .{});
-        return;
+        return error.X11InitializationFailed;
     }
 
     if (sdl.SDL_Init(sdl.SDL_INIT_VIDEO) < 0) {
         std.debug.print("Failed to initialize SDL\n", .{});
-        return;
+        return error.SDLInitializationFailed;
     }
     defer sdl.SDL_Quit();
 
@@ -144,13 +143,20 @@ pub fn main() !void {
     const width = 960;
     const height = 320;
     _ = sdl.SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
-    defer sdl.SDL_DestroyRenderer(renderer);
-    defer sdl.SDL_DestroyWindow(window);
+    defer {
+        sdl.SDL_DestroyRenderer(renderer);
+        sdl.SDL_DestroyWindow(window);
+    }
 
     _ = sdl.SDL_SetWindowBordered(window, sdl.SDL_FALSE);
 
-    const keycap_surface: *sdl.SDL_Surface = sdl.IMG_Load("assets/keycaps.png")
-        orelse return error.FileNotFound;
+    const keycaps = @embedFile("keycaps.png");
+    const rw = sdl.SDL_RWFromConstMem(keycaps, keycaps.len) orelse {
+        return error.SDLInitializationFailed;
+    };
+    const keycap_surface: *sdl.SDL_Surface = sdl.IMG_Load_RW(rw, 0) orelse {
+        return error.SDLInitializationFailed;
+    };
     defer sdl.SDL_FreeSurface(keycap_surface);
 
     keycap_width = keycap_surface.w;
