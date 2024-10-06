@@ -12,10 +12,18 @@ jobs:
       matrix:
         zig_version:
           - latest
-          - master
+          #- master - not compatible yet
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v1
         with:
           version: ${{ matrix.zig_version }}
-      - run: zig build test
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt-get install libsdl2-dev libsdl2-image-dev libxi-dev
+      # kle tests not triggered from main,
+      # must figure out how to properly zig test
+      - run: |
+          zig build test
+          zig test src/kle.zig
