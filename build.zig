@@ -18,6 +18,9 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary(lib);
     }
 
+    const clap = b.dependency("clap", .{});
+    exe.root_module.addImport("clap", clap.module("clap"));
+
     b.installArtifact(exe);
 
     // This *creates* a Run step in the build graph, to be executed when another

@@ -1,3 +1,4 @@
+const clap = @import("clap");
 const std = @import("std");
 const kle = @import("kle.zig");
 const sdl = @cImport({
@@ -93,7 +94,8 @@ fn loop(renderer: ?*sdl.SDL_Renderer) void {
 
         if (x11.XGetEventData(display.?, cookie) != 0 and
             cookie.type == x11.GenericEvent and
-            cookie.extension == xi_opcode) {
+            cookie.extension == xi_opcode)
+        {
             const raw_event: *x11.XIRawEvent = @alignCast(@ptrCast(cookie.data));
             switch (cookie.evtype) {
                 x11.XI_RawKeyPress, x11.XI_RawKeyRelease => {
@@ -114,13 +116,26 @@ fn loop(renderer: ?*sdl.SDL_Renderer) void {
         render(renderer);
         sdl.SDL_RenderPresent(renderer);
     }
-
 }
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help             Display this help and exit.
+        \\
+    );
+
+    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{ .allocator = allocator });
+    defer res.deinit();
+
+    if (res.args.help != 0) {
+        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{
+            .spacing_between_parameters = 0
+        });
+    }
 
     var event: c_int = 0;
     var err: c_int = 0;
@@ -164,7 +179,7 @@ pub fn main() !void {
         if (label) |l| {
             var iter = std.mem.split(u8, l, ",");
             while (iter.next()) |part| {
-                std.debug.print("{}: label: {s}\n", .{index, part});
+                std.debug.print("{}: label: {s}\n", .{ index, part });
                 const integer = try std.fmt.parseInt(u8, part, 10);
                 keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
             }
