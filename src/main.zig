@@ -125,6 +125,7 @@ pub fn main() !void {
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help             Display this help and exit.
+        \\-l, --layout <str>     Keyboard layout json file.
         \\
     );
 
@@ -136,6 +137,49 @@ pub fn main() !void {
             .spacing_between_parameters = 0
         });
     }
+
+    const kle_str_default = @embedFile("keyboard-layout.json");
+    var kle_str: []u8 = undefined;
+
+    if (res.args.layout) |n| {
+        std.debug.print("--layout = {s}\n", .{n});
+        var layout_file = try std.fs.cwd().openFile(n, .{});
+        defer layout_file.close();
+        const file_size = (try layout_file.stat()).size;
+        kle_str = try std.fs.cwd().readFileAlloc(allocator, n, file_size);
+    } else {
+        kle_str = try allocator.alloc(u8, kle_str_default.len);
+        @memcpy(kle_str, kle_str_default);
+    }
+
+    const keyboard_parsed = try kle.parseFromSlice(allocator, kle_str);
+    defer {
+        allocator.free(kle_str);
+        keyboard_parsed.deinit();
+    }
+
+    keyboard = keyboard_parsed.value;
+    key_states = try allocator.alloc(bool, keyboard.keys.len);
+    defer allocator.free(key_states);
+    @memset(key_states, false);
+
+    // calculate key lookup
+    for (keyboard.keys, 0..) |key, index| {
+        const label = key.labels[0];
+        if (label) |l| {
+            var iter = std.mem.split(u8, l, ",");
+            while (iter.next()) |part| {
+                std.debug.print("{}: label: {s}\n", .{ index, part });
+                const integer = try std.fmt.parseInt(u8, part, 10);
+                keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
+            }
+        }
+    }
+
+    const bbox = try keyboard.calculateBoundingBox();
+    const width: c_int = @intFromFloat(bbox.w * KEY_1U_PX);
+    const height: c_int = @intFromFloat(bbox.h * KEY_1U_PX);
+
 
     var event: c_int = 0;
     var err: c_int = 0;
@@ -162,33 +206,6 @@ pub fn main() !void {
 
     var window: ?*sdl.SDL_Window = null;
     var renderer: ?*sdl.SDL_Renderer = null;
-
-    // would be loaded from CLI provided argument or from path from config file, for now just embed
-    const kle_str = @embedFile("keyboard-layout.json");
-    const keyboard_parsed = try kle.parseFromSlice(allocator, kle_str);
-    defer keyboard_parsed.deinit();
-
-    keyboard = keyboard_parsed.value;
-    key_states = try allocator.alloc(bool, keyboard.keys.len);
-    defer allocator.free(key_states);
-    @memset(key_states, false);
-
-    // calculate key lookup
-    for (keyboard.keys, 0..) |key, index| {
-        const label = key.labels[0];
-        if (label) |l| {
-            var iter = std.mem.split(u8, l, ",");
-            while (iter.next()) |part| {
-                std.debug.print("{}: label: {s}\n", .{ index, part });
-                const integer = try std.fmt.parseInt(u8, part, 10);
-                keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
-            }
-        }
-    }
-
-    const bbox = try keyboard.calculateBoundingBox();
-    const width: c_int = @intFromFloat(bbox.w * KEY_1U_PX);
-    const height: c_int = @intFromFloat(bbox.h * KEY_1U_PX);
 
     _ = sdl.SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
     defer {
