@@ -1,4 +1,5 @@
 const clap = @import("clap");
+const math = @import("math.zig");
 const std = @import("std");
 const kle = @import("kle.zig");
 const sdl = @cImport({
@@ -21,29 +22,25 @@ var xi_opcode: i32 = 0;
 
 var keyboard: kle.Keyboard = undefined;
 var key_states: []bool = undefined;
+var key_states2: []KeyOnScreen = undefined;
 var keycode_keyboard_lookup = [_]i32{-1} ** 256;
+
+pub const KeyOnScreen = struct {
+    x: c_int,
+    y: c_int,
+    angle: f64,
+    texture: sdl.struct_SDL_Rect,
+};
 
 fn render(renderer: ?*sdl.SDL_Renderer) void {
     _ = sdl.SDL_SetRenderDrawBlendMode(renderer, sdl.SDL_BLENDMODE_BLEND);
     _ = sdl.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128);
 
-    for (keyboard.keys, 0..) |k, index| {
-        const x: c_int = @intFromFloat(KEY_1U_PX * k.x);
-        const y: c_int = @intFromFloat(KEY_1U_PX * k.y);
-        const width: c_int = @intFromFloat(KEY_1U_PX * @max(k.width, k.width2));
-        const height: c_int = @intFromFloat(KEY_1U_PX * @max(k.height, k.height2));
-        const texture_y: c_int = @intFromFloat(KEY_1U_PX * (k.width * 4 - 4));
-        var src = sdl.SDL_Rect{ .x = 0, .y = texture_y, .w = width, .h = height };
-        var dst = sdl.SDL_Rect{ .x = x, .y = y, .w = width, .h = height };
+    const rot = sdl.SDL_Point{ .x = 0, .y = 0 };
 
-        if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
-            // iso enter
-            src.x = 2 * KEY_1U_PX;
-            src.y = 0;
-            dst.x -= @intFromFloat(0.25 * KEY_1U_PX);
-        }
-
-        _ = sdl.SDL_RenderCopy(renderer, keycap_texture, &src, &dst);
+    for (key_states2, 0..) |k, index| {
+        var dst = sdl.SDL_Rect{ .x = k.x, .y = k.y, .w = k.texture.w, .h = k.texture.h };
+        _ = sdl.SDL_RenderCopyEx(renderer, keycap_texture, &k.texture, &dst, k.angle, &rot, sdl.SDL_FLIP_NONE);
         if (key_states[index]) {
             _ = sdl.SDL_RenderFillRect(renderer, &dst);
         }
@@ -162,6 +159,33 @@ pub fn main() !void {
     key_states = try allocator.alloc(bool, keyboard.keys.len);
     defer allocator.free(key_states);
     @memset(key_states, false);
+
+    key_states2 = try allocator.alloc(KeyOnScreen, keyboard.keys.len);
+    defer allocator.free(key_states2);
+
+    for (keyboard.keys, 0..) |k, index| {
+        var s = &key_states2[index];
+
+        s.angle = k.rotation_angle;
+        const angle_rad = std.math.rad_per_deg * s.angle;
+        const point = math.Vec2{ .x = k.x, .y = k.y };
+        const rot_origin = math.Vec2{ .x = k.rotation_x, .y = k.rotation_y };
+        const result = math.rotate_around_center(point, rot_origin, angle_rad);
+        s.x = @intFromFloat(KEY_1U_PX * result.x);
+        s.y = @intFromFloat(KEY_1U_PX * result.y);
+
+        const width: c_int = @intFromFloat(KEY_1U_PX * @max(k.width, k.width2));
+        const height: c_int = @intFromFloat(KEY_1U_PX * @max(k.height, k.height2));
+        const texture_y: c_int = @intFromFloat(KEY_1U_PX * (k.width * 4 - 4));
+
+        if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
+            // iso enter
+            s.x -= @intFromFloat(0.25 * KEY_1U_PX);
+            s.texture = .{ .x = 2 * KEY_1U_PX, .y = 0, .w = width, .h = height };
+        } else {
+            s.texture = .{ .x = 0, .y = texture_y, .w = width, .h = height };
+        }
+    }
 
     // calculate key lookup
     for (keyboard.keys, 0..) |key, index| {

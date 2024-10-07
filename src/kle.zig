@@ -1,5 +1,8 @@
 const std = @import("std");
+const math = @import("math.zig");
 const json = std.json;
+
+const Point = math.Vec2;
 
 const DEFAULT_KEY_COLOR = "#cccccc";
 const DEFAULT_TEXT_COLOR = "#000000";
@@ -19,19 +22,6 @@ const LABEL_MAP = [_][KEY_MAX_LABELS]i64 {
     .{ 3,-1, 5,-1,10,-1,-1,-1, 4,-1,-1,-1 }, // 6 = center front & y
     .{ 4,-1,-1,-1,10,-1,-1,-1,-1,-1,-1,-1 }, // 7 = center front & x & y
 };
-
-const Point = struct { x: f64, y: f64 };
-
-fn rotate(origin: Point, point: Point, angle: f64) Point {
-    const ox = origin.x;
-    const oy = origin.y;
-    const px = point.x;
-    const py = point.y;
-    const radians = std.math.rad_per_deg * angle;
-    const qx = ox + @cos(radians) * (px - ox) - @sin(radians) * (py - oy);
-    const qy = oy + @sin(radians) * (px - ox) + @cos(radians) * (py - oy);
-    return .{ .x = qx, .y = qy };
-}
 
 pub const KeyDefault = struct {
     textColor: []const u8 = DEFAULT_TEXT_COLOR,
@@ -121,6 +111,7 @@ pub const Keyboard = struct {
         for (self.keys) |k| {
             const angle = k.rotation_angle;
             if (angle != 0) {
+                const angle_rad = std.math.rad_per_deg * angle;
                 const rot_origin = Point{ .x = k.rotation_x, .y = k.rotation_y };
 
                 // when rotated, check each corner
@@ -136,7 +127,8 @@ pub const Keyboard = struct {
                 };
 
                 for (corners) |p| {
-                    const rotated = rotate(rot_origin, p, angle);
+                    const rotated = math.rotate_around_center(p, rot_origin, angle_rad);
+
                     if (rotated.x >= max_x) max_x = rotated.x;
                     if (rotated.y >= max_y) max_y = rotated.y;
                 }
@@ -154,22 +146,11 @@ pub const Keyboard = struct {
     }
 };
 
-fn round(value: f64, comptime places: u32) f64 {
-    const factor: f64 = @floatCast(std.math.pow(f64, 10, places));
-    return @round(value * factor) / factor;
-}
-
 fn asf64(v: json.Value) !f64 {
     switch(v) {
-        .integer => {
-            return @floatFromInt(v.integer);
-        },
-        .float => {
-            return v.float;
-        },
-        else => {
-            return error.Unexpected;
-        }
+        .integer => return @floatFromInt(v.integer),
+        .float => return v.float,
+        else => return error.Unexpected
     }
 }
 
@@ -227,7 +208,7 @@ fn parseKle(kle: json.Value, arena: *std.heap.ArenaAllocator) !Keyboard {
 
                                     try keys.append(new_key);
 
-                                    current.x = round(current.x + current.width, 6);
+                                    current.x = math.round(current.x + current.width, 6);
                                     current.width = 1;
                                     current.height = 1;
                                     current.x2 = 0;
@@ -282,10 +263,10 @@ fn parseKle(kle: json.Value, arena: *std.heap.ArenaAllocator) !Keyboard {
                                         _ = v;
                                     }
                                     if (key.object.get("x")) |v| {
-                                        current.x = round(current.x + try asf64(v), 6);
+                                        current.x = math.round(current.x + try asf64(v), 6);
                                     }
                                     if (key.object.get("y")) |v| {
-                                        current.y = round(current.y + try asf64(v), 6);
+                                        current.y = math.round(current.y + try asf64(v), 6);
                                     }
                                     if (key.object.get("w")) |v| {
                                         const w = try asf64(v);
@@ -338,7 +319,7 @@ fn parseKle(kle: json.Value, arena: *std.heap.ArenaAllocator) !Keyboard {
                         }
 
                         // end of the row:
-                        current.y = round(current.y + 1, 6);
+                        current.y = math.round(current.y + 1, 6);
                         current.x = current.rotation_x;
                     },
                     else => {
