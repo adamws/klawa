@@ -1,49 +1,28 @@
 const clap = @import("clap");
-const math = @import("math.zig");
+const rl = @import("raylib");
+const rgui = @import("raygui");
 const std = @import("std");
-const kle = @import("kle.zig");
-const sdl = @cImport({
-    @cInclude("SDL2/SDL.h");
-    @cInclude("SDL2/SDL_image.h");
-});
+
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/extensions/XInput2.h");
 });
 
+const math = @import("math.zig");
+const kle = @import("kle.zig");
+
 pub const KEY_1U_PX = 64;
-
-
-var keycap_texture: ?*sdl.SDL_Texture = null;
-var keycap_width: i32 = -1;
-var keycap_height: i32 = -1;
 
 var keyboard: kle.Keyboard = undefined;
 var key_states: []KeyOnScreen = undefined;
 var keycode_keyboard_lookup = [_]i32{-1} ** 256;
 
 pub const KeyOnScreen = struct {
-    x: c_int,
-    y: c_int,
-    angle: f64,
-    texture: sdl.struct_SDL_Rect,
+    src: rl.Rectangle,
+    dst: rl.Rectangle,
+    angle: f32,
     pressed: bool,
 };
-
-fn render(renderer: ?*sdl.SDL_Renderer) void {
-    _ = sdl.SDL_SetRenderDrawBlendMode(renderer, sdl.SDL_BLENDMODE_BLEND);
-    _ = sdl.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128);
-
-    const rot = sdl.SDL_Point{ .x = 0, .y = 0 };
-
-    for (key_states) |k| {
-        var dst = sdl.SDL_Rect{ .x = k.x, .y = k.y, .w = k.texture.w, .h = k.texture.h };
-        _ = sdl.SDL_RenderCopyEx(renderer, keycap_texture, &k.texture, &dst, k.angle, &rot, sdl.SDL_FLIP_NONE);
-        if (k.pressed) {
-            _ = sdl.SDL_RenderFillRect(renderer, &dst);
-        }
-    }
-}
 
 fn xiSetMask(ptr: []u8, event: usize) void {
     const offset: u3 = @truncate(event);
@@ -93,7 +72,7 @@ fn x11Listener() !void {
 
     selectEvents(display, win);
 
-    while(true) {
+    while (true) {
         // x11 wait for event (only raw key presses selected)
         var ev: x11.XEvent = undefined;
         const cookie: *x11.XGenericEventCookie = @ptrCast(&ev.xcookie);
@@ -122,27 +101,6 @@ fn x11Listener() !void {
     }
 }
 
-fn loop(renderer: ?*sdl.SDL_Renderer) void {
-    var running = true;
-    var event: sdl.SDL_Event = undefined;
-
-    while (running) {
-        _ = sdl.SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-        _ = sdl.SDL_RenderClear(renderer);
-
-        // SDL event loop, just for detecting quit
-        while (sdl.SDL_PollEvent(&event) != 0) {
-            switch (event.type) {
-                sdl.SDL_QUIT => running = false,
-                else => {},
-            }
-        }
-
-        render(renderer);
-        sdl.SDL_RenderPresent(renderer);
-    }
-}
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -159,7 +117,7 @@ pub fn main() !void {
 
     if (res.args.help != 0) {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{
-            .spacing_between_parameters = 0
+            .spacing_between_parameters = 0,
         });
     }
 
@@ -190,25 +148,35 @@ pub fn main() !void {
     for (keyboard.keys, 0..) |k, index| {
         var s = &key_states[index];
 
-        s.angle = k.rotation_angle;
-        const angle_rad = std.math.rad_per_deg * s.angle;
+        const angle_rad = std.math.rad_per_deg * k.rotation_angle;
         const point = math.Vec2{ .x = k.x, .y = k.y };
         const rot_origin = math.Vec2{ .x = k.rotation_x, .y = k.rotation_y };
         const result = math.rotate_around_center(point, rot_origin, angle_rad);
-        s.x = @intFromFloat(KEY_1U_PX * result.x);
-        s.y = @intFromFloat(KEY_1U_PX * result.y);
 
-        const width: c_int = @intFromFloat(KEY_1U_PX * @max(k.width, k.width2));
-        const height: c_int = @intFromFloat(KEY_1U_PX * @max(k.height, k.height2));
-        const texture_y: c_int = @intFromFloat(KEY_1U_PX * (k.width * 4 - 4));
+        const width: f32 = @floatCast(KEY_1U_PX * @max(k.width, k.width2));
+        const height: f32 = @floatCast(KEY_1U_PX * @max(k.height, k.height2));
 
+        s.src = rl.Rectangle{
+            .x = 0,
+            .y = @floatCast(KEY_1U_PX * (k.width * 4 - 4)),
+            .width = width,
+            .height = height,
+        };
+        s.dst = rl.Rectangle{
+            .x = @floatCast(KEY_1U_PX * result.x),
+            .y = @floatCast(KEY_1U_PX * result.y),
+            .width = width,
+            .height = height,
+        };
+        s.angle = @floatCast(k.rotation_angle);
+
+        // special case: iso enter
         if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
-            // iso enter
-            s.x -= @intFromFloat(0.25 * KEY_1U_PX);
-            s.texture = .{ .x = 2 * KEY_1U_PX, .y = 0, .w = width, .h = height };
-        } else {
-            s.texture = .{ .x = 0, .y = texture_y, .w = width, .h = height };
+            s.src.x = 2 * KEY_1U_PX;
+            s.src.y = 0;
+            s.dst.x -= 0.25 * KEY_1U_PX;
         }
+
         s.pressed = false;
     }
 
@@ -228,43 +196,103 @@ pub fn main() !void {
     const bbox = try keyboard.calculateBoundingBox();
     const width: c_int = @intFromFloat(bbox.w * KEY_1U_PX);
     const height: c_int = @intFromFloat(bbox.h * KEY_1U_PX);
-
-    if (sdl.SDL_Init(sdl.SDL_INIT_VIDEO) < 0) {
-        std.debug.print("Failed to initialize SDL\n", .{});
-        return error.SDLInitializationFailed;
-    }
-    defer sdl.SDL_Quit();
-
-    _ = sdl.SDL_EventState(sdl.SDL_KEYDOWN, sdl.SDL_IGNORE);
-    _ = sdl.SDL_EventState(sdl.SDL_KEYUP, sdl.SDL_IGNORE);
-
-    var window: ?*sdl.SDL_Window = null;
-    var renderer: ?*sdl.SDL_Renderer = null;
-
-    _ = sdl.SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
-    defer {
-        sdl.SDL_DestroyRenderer(renderer);
-        sdl.SDL_DestroyWindow(window);
-    }
-
-    _ = sdl.SDL_SetWindowBordered(window, sdl.SDL_FALSE);
-
-    const keycaps = @embedFile("keycaps.png");
-    const rw = sdl.SDL_RWFromConstMem(keycaps, keycaps.len) orelse {
-        return error.SDLInitializationFailed;
-    };
-    const keycap_surface: *sdl.SDL_Surface = sdl.IMG_Load_RW(rw, 0) orelse {
-        return error.SDLInitializationFailed;
-    };
-    defer sdl.SDL_FreeSurface(keycap_surface);
-
-    keycap_width = keycap_surface.w;
-    keycap_height = keycap_surface.h;
-    keycap_texture = sdl.SDL_CreateTextureFromSurface(renderer, keycap_surface);
-    defer sdl.SDL_DestroyTexture(keycap_texture);
+    std.debug.print("Canvas: {}x{}\n", .{ width, height });
 
     const thread = try std.Thread.spawn(.{}, x11Listener, .{});
     _ = thread;
 
-    loop(renderer);
+    rl.setConfigFlags(.{ .msaa_4x_hint = true, .vsync_hint = true, .window_highdpi = true });
+    rl.initWindow(width, height, "klawa");
+    defer rl.closeWindow();
+
+    // TODO: make this optional/configurable:
+    rl.setWindowState(.{ .window_undecorated = true });
+
+    rl.setExitKey(rl.KeyboardKey.key_null);
+
+    const keycaps = @embedFile("keycaps.png");
+    const keycaps_image = rl.loadImageFromMemory(".png", keycaps);
+    const keycap_texture = rl.loadTextureFromImage(keycaps_image);
+    defer rl.unloadTexture(keycap_texture);
+
+    rl.setTextureFilter(keycap_texture, rl.TextureFilter.texture_filter_bilinear);
+
+    // texture created, image no longer needed
+    rl.unloadImage(keycaps_image);
+
+    // TODO: implement font discovery
+    // TODO: if not found fallback to default
+    const font = rl.loadFont("/usr/share/fonts/TTF/DejaVuSans.ttf");
+    const default_font = rl.getFontDefault();
+
+    rl.setTargetFPS(60);
+
+    var exit_window = false;
+    var show_gui = false;
+
+    const exit_label = "Exit Application";
+    const exit_text_width = rl.measureText(exit_label, default_font.baseSize);
+
+    while (!exit_window) {
+        if (rl.windowShouldClose()) {
+            exit_window = true;
+        }
+
+        if (rl.isMouseButtonPressed(rl.MouseButton.mouse_button_right)) {
+            std.debug.print("Toggle settings\n", .{});
+            show_gui = !show_gui;
+        }
+
+        rl.beginDrawing();
+        rl.clearBackground(rl.Color.white);
+
+        const rot = rl.Vector2{ .x = 0, .y = 0 };
+
+        for (key_states) |k| {
+            rl.drawTexturePro(keycap_texture, k.src, k.dst, rot, k.angle, rl.Color.white);
+
+            if (k.pressed) {
+                rl.drawRectanglePro(
+                    k.dst,
+                    rot,
+                    k.angle,
+                    rl.Color{ .r = 255, .g = 0, .b = 0, .a = 128 },
+                );
+            }
+        }
+
+        if (show_gui) {
+            rl.drawRectangle(
+                0,
+                0,
+                width,
+                height,
+                rl.Color{ .r = 0, .g = 0, .b = 0, .a = 128 },
+            );
+            rl.drawTextEx(
+                font,
+                "Settings menu (todo)",
+                .{ .x = 190, .y = 200 },
+                32,
+                0,
+                rl.Color.red,
+            );
+
+            if (1 == rgui.guiButton(
+                .{
+                    .x = @floatFromInt(width - 48 - exit_text_width),
+                    .y = 16,
+                    .width = @floatFromInt(32 + exit_text_width),
+                    .height = 32,
+                },
+                std.fmt.comptimePrint("#113#{s}", .{exit_label}),
+            )) {
+                exit_window = true;
+            }
+        }
+
+        rl.endDrawing();
+    }
+
+    std.debug.print("Exit\n", .{});
 }

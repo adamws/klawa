@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
-          sudo apt-get install libsdl2-dev libsdl2-image-dev libxi-dev
+          sudo apt-get install libxi-dev
       # kle tests not triggered from main,
       # must figure out how to properly zig test
       - run: |

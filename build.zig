@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const CFlags = &.{};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -13,13 +15,26 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibC();
 
-    const system_libs = [_][]const u8{ "SDL2", "SDL2_image", "X11", "Xi" };
+    const system_libs = [_][]const u8{ "X11", "Xi" };
     for (system_libs) |lib| {
         exe.linkSystemLibrary(lib);
     }
 
     const clap = b.dependency("clap", .{});
     exe.root_module.addImport("clap", clap.module("clap"));
+
+    const raylib_dep = b.dependency("raylib-zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const raylib = raylib_dep.module("raylib");
+    const raygui = raylib_dep.module("raygui");
+    const raylib_artifact = raylib_dep.artifact("raylib");
+
+    exe.linkLibrary(raylib_artifact);
+    exe.root_module.addImport("raylib", raylib);
+    exe.root_module.addImport("raygui", raygui);
 
     b.installArtifact(exe);
 
