@@ -13,12 +13,10 @@ const x11 = @cImport({
 
 pub const KEY_1U_PX = 64;
 
-var display: ?*x11.Display = null;
 
 var keycap_texture: ?*sdl.SDL_Texture = null;
 var keycap_width: i32 = -1;
 var keycap_height: i32 = -1;
-var xi_opcode: i32 = 0;
 
 var keyboard: kle.Keyboard = undefined;
 var key_states: []KeyOnScreen = undefined;
@@ -52,7 +50,7 @@ fn xiSetMask(ptr: []u8, event: usize) void {
     ptr[event >> 3] |= @as(u8, 1) << offset;
 }
 
-fn selectEvents(win: x11.Window) void {
+fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
     const mask_len = x11.XIMaskLen(x11.XI_LASTEVENT);
 
     var flags = [_]u8{0} ** mask_len;
@@ -68,22 +66,34 @@ fn selectEvents(win: x11.Window) void {
     _ = x11.XSync(display.?, 0);
 }
 
-fn loop(renderer: ?*sdl.SDL_Renderer) void {
-    var running = true;
-    var event: sdl.SDL_Event = undefined;
+fn x11Listener() !void {
+    var display: ?*x11.Display = null;
 
-    while (running) {
-        _ = sdl.SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-        _ = sdl.SDL_RenderClear(renderer);
+    var event: c_int = 0;
+    var err: c_int = 0;
+    var xi_opcode: i32 = 0;
 
-        // SDL event loop, just for detecting quit
-        while (sdl.SDL_PollEvent(&event) != 0) {
-            switch (event.type) {
-                sdl.SDL_QUIT => running = false,
-                else => {},
-            }
-        }
+    display = x11.XOpenDisplay(null);
+    if (display == null) {
+        std.debug.print("Unable to connect to X server\n", .{});
+        return error.X11InitializationFailed;
+    }
 
+    if (x11.XQueryExtension(display.?, "XInputExtension", &xi_opcode, &event, &err) == 0) {
+        std.debug.print("X Input extension not available.\n", .{});
+        return error.X11InitializationFailed;
+    }
+
+    const win: x11.Window = x11.DefaultRootWindow(display.?);
+    defer {
+        _ = x11.XDestroyWindow(display.?, win);
+        _ = x11.XSync(display.?, 0);
+        _ = x11.XCloseDisplay(display.?);
+    }
+
+    selectEvents(display, win);
+
+    while(true) {
         // x11 wait for event (only raw key presses selected)
         var ev: x11.XEvent = undefined;
         const cookie: *x11.XGenericEventCookie = @ptrCast(&ev.xcookie);
@@ -109,6 +119,24 @@ fn loop(renderer: ?*sdl.SDL_Renderer) void {
         }
 
         x11.XFreeEventData(display.?, cookie);
+    }
+}
+
+fn loop(renderer: ?*sdl.SDL_Renderer) void {
+    var running = true;
+    var event: sdl.SDL_Event = undefined;
+
+    while (running) {
+        _ = sdl.SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+        _ = sdl.SDL_RenderClear(renderer);
+
+        // SDL event loop, just for detecting quit
+        while (sdl.SDL_PollEvent(&event) != 0) {
+            switch (event.type) {
+                sdl.SDL_QUIT => running = false,
+                else => {},
+            }
+        }
 
         render(renderer);
         sdl.SDL_RenderPresent(renderer);
@@ -201,21 +229,6 @@ pub fn main() !void {
     const width: c_int = @intFromFloat(bbox.w * KEY_1U_PX);
     const height: c_int = @intFromFloat(bbox.h * KEY_1U_PX);
 
-
-    var event: c_int = 0;
-    var err: c_int = 0;
-
-    display = x11.XOpenDisplay(null);
-    if (display == null) {
-        std.debug.print("Unable to connect to X server\n", .{});
-        return error.X11InitializationFailed;
-    }
-
-    if (x11.XQueryExtension(display.?, "XInputExtension", &xi_opcode, &event, &err) == 0) {
-        std.debug.print("X Input extension not available.\n", .{});
-        return error.X11InitializationFailed;
-    }
-
     if (sdl.SDL_Init(sdl.SDL_INIT_VIDEO) < 0) {
         std.debug.print("Failed to initialize SDL\n", .{});
         return error.SDLInitializationFailed;
@@ -250,20 +263,8 @@ pub fn main() !void {
     keycap_texture = sdl.SDL_CreateTextureFromSurface(renderer, keycap_surface);
     defer sdl.SDL_DestroyTexture(keycap_texture);
 
-    const win: x11.Window = x11.DefaultRootWindow(display.?);
-    defer {
-        _ = x11.XDestroyWindow(display.?, win);
-        _ = x11.XSync(display.?, 0);
-        _ = x11.XCloseDisplay(display.?);
-    }
-
-    selectEvents(win);
-
-    // render once before loop because loop blocks when no x11 events
-    _ = sdl.SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-    _ = sdl.SDL_RenderClear(renderer);
-    render(renderer);
-    sdl.SDL_RenderPresent(renderer);
+    const thread = try std.Thread.spawn(.{}, x11Listener, .{});
+    _ = thread;
 
     loop(renderer);
 }
