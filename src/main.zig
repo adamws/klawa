@@ -21,8 +21,7 @@ var keycap_height: i32 = -1;
 var xi_opcode: i32 = 0;
 
 var keyboard: kle.Keyboard = undefined;
-var key_states: []bool = undefined;
-var key_states2: []KeyOnScreen = undefined;
+var key_states: []KeyOnScreen = undefined;
 var keycode_keyboard_lookup = [_]i32{-1} ** 256;
 
 pub const KeyOnScreen = struct {
@@ -30,6 +29,7 @@ pub const KeyOnScreen = struct {
     y: c_int,
     angle: f64,
     texture: sdl.struct_SDL_Rect,
+    pressed: bool,
 };
 
 fn render(renderer: ?*sdl.SDL_Renderer) void {
@@ -38,10 +38,10 @@ fn render(renderer: ?*sdl.SDL_Renderer) void {
 
     const rot = sdl.SDL_Point{ .x = 0, .y = 0 };
 
-    for (key_states2, 0..) |k, index| {
+    for (key_states) |k| {
         var dst = sdl.SDL_Rect{ .x = k.x, .y = k.y, .w = k.texture.w, .h = k.texture.h };
         _ = sdl.SDL_RenderCopyEx(renderer, keycap_texture, &k.texture, &dst, k.angle, &rot, sdl.SDL_FLIP_NONE);
-        if (key_states[index]) {
+        if (k.pressed) {
             _ = sdl.SDL_RenderFillRect(renderer, &dst);
         }
     }
@@ -101,7 +101,7 @@ fn loop(renderer: ?*sdl.SDL_Renderer) void {
                     const lookup: i32 = keycode_keyboard_lookup[keycode];
                     if (lookup >= 0) {
                         const index: usize = @intCast(lookup);
-                        key_states[index] = cookie.evtype == x11.XI_RawKeyPress;
+                        key_states[index].pressed = cookie.evtype == x11.XI_RawKeyPress;
                     }
                 },
                 else => {},
@@ -156,15 +156,11 @@ pub fn main() !void {
     }
 
     keyboard = keyboard_parsed.value;
-    key_states = try allocator.alloc(bool, keyboard.keys.len);
+    key_states = try allocator.alloc(KeyOnScreen, keyboard.keys.len);
     defer allocator.free(key_states);
-    @memset(key_states, false);
-
-    key_states2 = try allocator.alloc(KeyOnScreen, keyboard.keys.len);
-    defer allocator.free(key_states2);
 
     for (keyboard.keys, 0..) |k, index| {
-        var s = &key_states2[index];
+        var s = &key_states[index];
 
         s.angle = k.rotation_angle;
         const angle_rad = std.math.rad_per_deg * s.angle;
@@ -185,6 +181,7 @@ pub fn main() !void {
         } else {
             s.texture = .{ .x = 0, .y = texture_y, .w = width, .h = height };
         }
+        s.pressed = false;
     }
 
     // calculate key lookup
