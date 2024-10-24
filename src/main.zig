@@ -2,8 +2,6 @@ const clap = @import("clap");
 const rl = @import("raylib");
 const rgui = @import("raygui");
 const std = @import("std");
-const builtin = @import("builtin");
-const native_endian = builtin.cpu.arch.endian();
 
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
