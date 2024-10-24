@@ -27,3 +27,4 @@ jobs:
       - run: |
           zig build test
           zig test src/kle.zig
+          zig test src/spsc_queue.zig
