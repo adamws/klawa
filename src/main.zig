@@ -409,14 +409,19 @@ pub fn main() !void {
         if (keys.pop()) |k| {
             std.debug.print("Consumed: '{s}'\n", .{k.symbol});
 
+            var text_: [*:0]const u8 = undefined;
+            // TODO: create comptime symbol lookup table and use it here:
             if (std.mem.eql(u8, std.mem.sliceTo(k.symbol, 0), "BackSpace")) {
                 std.debug.print(
                     "replacement for {s} would happen \n",
                     .{k.symbol},
                 );
+                text_ = "↚";
+            } else {
+                text_ = @ptrCast(&k.string);
             }
 
-            if (rl.loadCodepoints(@ptrCast(&k.string))) |codepoints_| {
+            if (rl.loadCodepoints(text_)) |codepoints_| {
                 for (codepoints_) |cp| {
                     codepoints_buffer.push(cp);
                     std.debug.print("codepoints: '{any}'\n", .{codepoints_buffer});
