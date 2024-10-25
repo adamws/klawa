@@ -198,11 +198,12 @@ fn x11Listener(app_window: x11.Window) !void {
                         var status: x11.Status = undefined;
                         const len = x11.Xutf8LookupString(xic, &e, &char_buffer, 32, &keysym, &status);
                         last_char_timestamp = std.time.timestamp();
-                        std.debug.print("time: {}\n", .{last_char_timestamp});
                         std.debug.print(
-                            "status: {any} keysym: 0x{X} buffer({}): '{s}'\n",
+                            "time: {} status: {any} keycode: {d} keysym: 0x{X} buffer({}): '{s}'\n",
                             .{
+                                last_char_timestamp,
                                 status,
+                                keycode,
                                 keysym,
                                 len,
                                 std.fmt.fmtSliceHexLower(&char_buffer),
