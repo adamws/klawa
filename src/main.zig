@@ -35,6 +35,11 @@ pub const KeyData = struct {
     status: x11.Status,
     symbol: [*c]u8, // owned by x11, in static area. Must not be modified.
     string: [32]u8,
+
+    comptime {
+        // this type is is copied a lot, keep it small
+        std.debug.assert(@sizeOf(KeyData) <= 64);
+    }
 };
 
 const CodepointBuffer = struct {
