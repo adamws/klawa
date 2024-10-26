@@ -1,15 +1,17 @@
+event_file := "events.bin"
+
 run:
   zig build run
 
 run-record:
   rm events.txt
-  zig build run -- --record events.txt
+  zig build run -- --record {{event_file}}
 
 run-replay:
-  zig build run -- --replay events.txt
+  zig build run -- --replay {{event_file}}
 
 run-replay-loop:
-  zig build run -- --replay events.txt --replay-loop
+  zig build run -- --replay {{event_file}} --replay-loop
 
 test-kle:
   zig test src/kle.zig
