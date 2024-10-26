@@ -357,6 +357,10 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
                 std.debug.print("End of file", .{});
                 if (loop) {
                     try file.seekTo(0);
+                    for (key_states, 0..) |_, i| {
+                        var s = &key_states[i];
+                        s.pressed = false;
+                    }
                 } else {
                     run_loop = false;
                 }
