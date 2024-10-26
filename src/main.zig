@@ -172,6 +172,14 @@ const all_text = text ++ symbols;
 
 const font_data = @embedFile("resources/Hack-Regular.ttf");
 
+fn updateKeyStates(keycode: usize, pressed: bool) void {
+    const lookup: i32 = keycode_keyboard_lookup[keycode];
+    if (lookup >= 0) {
+        const index: usize = @intCast(lookup);
+        key_states[index].pressed = pressed;
+    }
+}
+
 fn xiSetMask(ptr: []u8, event: usize) void {
     const offset: u3 = @truncate(event);
     ptr[event >> 3] |= @as(u8, 1) << offset;
@@ -255,11 +263,7 @@ fn x11Listener(app_window: x11.Window, record_file: ?[]const u8) !void {
                         _ = try file.writeAll(device_event_data[0..@sizeOf(x11.XIDeviceEvent)]);
                     }
 
-                    const lookup: i32 = keycode_keyboard_lookup[keycode];
-                    if (lookup >= 0) {
-                        const index: usize = @intCast(lookup);
-                        key_states[index].pressed = cookie.evtype == x11.XI_KeyPress;
-                    }
+                    updateKeyStates(keycode, cookie.evtype == x11.XI_KeyPress);
 
                     if (cookie.evtype == x11.XI_KeyPress) {
                         last_char_timestamp = std.time.timestamp();
@@ -329,12 +333,11 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
             }
 
             // do stuff with event-from-file
-            const keycode: usize = @intCast(device_event.detail);
-            const lookup: i32 = keycode_keyboard_lookup[keycode];
-            if (lookup >= 0) {
-                const index: usize = @intCast(lookup);
-                key_states[index].pressed = device_event.evtype == x11.XI_KeyPress;
-            }
+
+            updateKeyStates(
+                @intCast(device_event.detail),
+                device_event.evtype == x11.XI_KeyPress,
+            );
 
             if (device_event.evtype == x11.XI_KeyPress) {
                 last_char_timestamp = std.time.timestamp();
