@@ -170,9 +170,6 @@ const all_text = text ++ symbols;
 
 const font_data = @embedFile("resources/Hack-Regular.ttf");
 
-const record_events = false;
-const replay_events = false;
-
 fn xiSetMask(ptr: []u8, event: usize) void {
     const offset: u3 = @truncate(event);
     ptr[event >> 3] |= @as(u8, 1) << offset;
@@ -194,7 +191,7 @@ fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
     _ = x11.XSync(display.?, 0);
 }
 
-fn x11Listener(app_window: x11.Window) !void {
+fn x11Listener(app_window: x11.Window, record_file: ?[]const u8) !void {
     defer {
         std.debug.print("defer x11Listener\n", .{});
     }
@@ -210,10 +207,11 @@ fn x11Listener(app_window: x11.Window) !void {
 
     // TODO: use buffered writer, to do that we must gracefully handle this thread exit,
     // otherwise there is no good place to ensure writer flush
+    // TODO: support full file path
     var event_file: ?std.fs.File = null;
-    if (record_events) {
+    if (record_file) |filename| {
         const cwd = std.fs.cwd();
-        event_file = try cwd.createFile("events.txt", .{});
+        event_file = try cwd.createFile(filename, .{});
     }
     defer event_file.?.close();
 
@@ -287,7 +285,7 @@ fn x11Listener(app_window: x11.Window) !void {
 
 // uses events stored in file to reproduce them
 // assumes that only expected event types are recorded
-fn x11Producer(app_window: x11.Window) !void {
+fn x11Producer(app_window: x11.Window, replay_file: []const u8) !void {
     defer {
         std.debug.print("defer x11Producer\n", .{});
     }
@@ -302,7 +300,8 @@ fn x11Producer(app_window: x11.Window) !void {
 
     std.debug.print("Replay events from file\n", .{});
 
-    const file = try std.fs.cwd().openFile("events.txt", .{});
+    // TODO: support full path of a file
+    const file = try std.fs.cwd().openFile(replay_file, .{});
     defer file.close();
     var buf_reader = std.io.bufferedReader(file.reader());
     const reader = buf_reader.reader();
@@ -359,8 +358,10 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help             Display this help and exit.
         \\-l, --layout <str>     Keyboard layout json file.
+        \\    --record <str>     Record events to file.
+        \\    --replay <str>     Replay events from file.
+        \\-h, --help             Display this help and exit.
         \\
     );
 
@@ -457,14 +458,17 @@ pub fn main() !void {
     const app_window = glfw.glfwGetX11Window(@ptrCast(rl.getWindowHandle()));
     std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
 
-    if (replay_events) {
-        const thread = try std.Thread.spawn(.{}, x11Producer, .{app_window});
-        _ = thread;
+    var thread: ?std.Thread = null;
+    if (res.args.replay) |replay_file| {
+        // TODO: this will start processing events before rendering ready, add synchronization
+        thread = try std.Thread.spawn(.{}, x11Producer, .{ app_window, replay_file });
     } else {
-        const thread = try std.Thread.spawn(.{}, x11Listener, .{app_window});
-        _ = thread;
-        //defer thread.join();
+        // TODO: assign to thread var when close supported, join on this thread won't work now
+        _ = try std.Thread.spawn(.{}, x11Listener, .{ app_window, res.args.record });
     }
+    defer if (thread) |t| {
+        t.join();
+    };
 
     // TODO: make this optional/configurable:
     rl.setWindowState(.{ .window_undecorated = true });
