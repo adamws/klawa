@@ -492,8 +492,14 @@ pub fn main() !void {
     rl.initWindow(width, height, "klawa");
     defer rl.closeWindow();
 
+    const monitor_refreshrate = rl.getMonitorRefreshRate(rl.getCurrentMonitor());
+    std.debug.print("Current monitor refresh rate: {}\n", .{monitor_refreshrate});
+
     const app_window = glfw.glfwGetX11Window(@ptrCast(rl.getWindowHandle()));
     std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
+
+    // TODO: is this even needed?
+    rl.setTargetFPS(60);
 
     var thread: ?std.Thread = null;
     if (res.args.replay) |replay_file| {
@@ -552,8 +558,6 @@ pub fn main() !void {
     var codepoints_buffer = CodepointBuffer{};
 
     var frame_cnt: usize = 0;
-
-    rl.setTargetFPS(60);
 
     while (!exit_window) {
         if (rl.windowShouldClose()) {
