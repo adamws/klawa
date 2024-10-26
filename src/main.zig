@@ -92,6 +92,9 @@ const all_text = text ++ symbols;
 
 const font_data = @embedFile("resources/Hack-Regular.ttf");
 
+const record_events = false;
+const replay_events = true;
+
 fn xiSetMask(ptr: []u8, event: usize) void {
     const offset: u3 = @truncate(event);
     ptr[event >> 3] |= @as(u8, 1) << offset;
@@ -114,11 +117,23 @@ fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
 }
 
 fn x11Listener(app_window: x11.Window) !void {
+    defer {
+        std.debug.print("defer x11Listener\n", .{});
+    }
     var display: ?*x11.Display = null;
 
     var event: c_int = 0;
     var err: c_int = 0;
     var xi_opcode: i32 = 0;
+
+    // TODO: use buffered writer, to do that we must gracefuly handle this thread exit,
+    // otherwise there is no good place to ensure writer flush
+    var event_file: ?std.fs.File = null;
+    if (record_events) {
+        const cwd = std.fs.cwd();
+        event_file = try cwd.createFile("events.txt", .{});
+    }
+    defer event_file.?.close();
 
     display = x11.XOpenDisplay(null);
     if (display == null) {
@@ -164,6 +179,9 @@ fn x11Listener(app_window: x11.Window) !void {
         // x11 wait for event (only key press/release selected)
         var ev: x11.XEvent = undefined;
         const cookie: *x11.XGenericEventCookie = @ptrCast(&ev.xcookie);
+        // blocks, makes this thread impossible to exit:
+        // TODO: maybe use alarms?
+        // https://nrk.neocities.org/articles/x11-timeout-with-xsyncalarm
         _ = x11.XNextEvent(display.?, &ev);
 
         if (x11.XGetEventData(display.?, cookie) != 0 and
@@ -174,12 +192,16 @@ fn x11Listener(app_window: x11.Window) !void {
                 x11.XI_KeyPress, x11.XI_KeyRelease => {
                     const device_event: *x11.XIDeviceEvent = @alignCast(@ptrCast(cookie.data));
                     const keycode: usize = @intCast(device_event.detail);
-                    std.debug.print("keycode: {} {}\n", .{ keycode, cookie.evtype });
 
                     const lookup: i32 = keycode_keyboard_lookup[keycode];
                     if (lookup >= 0) {
                         const index: usize = @intCast(lookup);
                         key_states[index].pressed = cookie.evtype == x11.XI_KeyPress;
+                    }
+
+                    if (event_file) |file| {
+                        const device_event_data: [*]u8 = @ptrCast(device_event);
+                        _ = try file.writeAll(device_event_data[0..@sizeOf(x11.XIDeviceEvent)]);
                     }
 
                     if (cookie.evtype == x11.XI_KeyPress) {
@@ -242,6 +264,135 @@ fn x11Listener(app_window: x11.Window) !void {
 
     _ = x11.XSync(display.?, 0);
     _ = x11.XCloseDisplay(display.?);
+}
+
+// uses events stored in file to reproduce them
+// assumes that only expected event types are recorded
+fn x11Producer(app_window: x11.Window) !void {
+    defer {
+        std.debug.print("defer x11Producer\n", .{});
+    }
+
+    var display: ?*x11.Display = null;
+    display = x11.XOpenDisplay(null);
+    if (display == null) {
+        std.debug.print("Unable to connect to X server\n", .{});
+        return error.X11InitializationFailed;
+    }
+
+    const xim = x11.XOpenIM(display.?, null, null, null);
+    if (xim == null) {
+        std.debug.print("Cannot initialize input method\n", .{});
+        return error.X11InitializationFailed;
+    }
+    defer _ = x11.XCloseIM(xim);
+
+    const xic = x11.XCreateIC(
+        xim,
+        x11.XNInputStyle,
+        x11.XIMPreeditNothing | x11.XIMStatusNothing,
+        x11.XNClientWindow,
+        app_window,
+        x11.XNFocusWindow,
+        app_window,
+    );
+    if (xic == null) {
+        std.debug.print("Cannot initialize input context\n", .{});
+        return error.X11InitializationFailed;
+    }
+    defer x11.XDestroyIC(xic);
+
+    const file = try std.fs.cwd().openFile("events.txt", .{});
+    defer file.close();
+    var buf_reader = std.io.bufferedReader(file.reader());
+    const reader = buf_reader.reader();
+
+    // Simulate (approximately) timings of recorded events.
+    // This ignores effect of added delay due to the loop.
+    var events_count: usize = 0;
+    var timestamp: x11.Time = 0; // timestamp in x11 events is in milliseconds
+    var previous_timestamp: x11.Time = 0;
+    while (reader.readStruct(x11.XIDeviceEvent)) |event| {
+        timestamp = event.time;
+        const time_to_wait = timestamp - previous_timestamp;
+        std.debug.print("Should wait {} ms before emitting fake event\n", .{time_to_wait});
+        // first would be large because it is in reference to x11 server start,
+        // delay only on 1..n event
+        if (events_count != 0 and time_to_wait != 0) {
+            std.time.sleep(time_to_wait * std.time.ns_per_ms);
+        }
+        std.debug.print("{}: event: '{any}'\n", .{timestamp, event});
+
+        // do stuff with event-from-file
+        // TODO: duplicate code, refactor, probably should move
+        // x11 stuff to another file already
+        const keycode: usize = @intCast(event.detail);
+        const lookup: i32 = keycode_keyboard_lookup[keycode];
+        if (lookup >= 0) {
+            const index: usize = @intCast(lookup);
+            key_states[index].pressed = event.evtype == x11.XI_KeyPress;
+        }
+        if (event.evtype == x11.XI_KeyPress) {
+            var e: x11.XKeyPressedEvent = .{
+                .type = x11.XI_KeyPress,
+                .display = display,
+                .window = app_window,
+                .root = app_window,
+                .subwindow = 0,
+                .time = event.time,
+                .x = 0,
+                .y = 0,
+                .x_root = 0,
+                .y_root = 0,
+                .state = @intCast(event.mods.effective),
+                .keycode = @intCast(keycode),
+                .same_screen = 1,
+            };
+            var char_buffer = [_]u8{0} ** 32;
+            var keysym: x11.KeySym = undefined;
+            var status: x11.Status = undefined;
+            const len = x11.Xutf8LookupString(xic, &e, &char_buffer, 32, &keysym, &status);
+            last_char_timestamp = std.time.timestamp();
+            std.debug.print(
+                "time: {} status: {any} keycode: {d} keysym: 0x{X} buffer({}): '{s}'\n",
+                .{
+                    last_char_timestamp,
+                    status,
+                    keycode,
+                    keysym,
+                    len,
+                    std.fmt.fmtSliceHexLower(&char_buffer),
+                },
+            );
+
+            const key: KeyData = .{
+                .pressed = true,
+                .repeated = false,
+                .keycode = @intCast(keycode),
+                .keysym = keysym,
+                .status = status,
+                .symbol = x11.XKeysymToString(keysym),
+                .string = char_buffer,
+            };
+
+            while (!keys.push(key)) : ({
+                // this is unlikely scenario - normal typing would not be fast enough
+                std.debug.print("Consumer outpaced, try again\n", .{});
+                std.time.sleep(10 * std.time.ns_per_ms);
+            }) {}
+            std.debug.print("Produced: '{any}'\n", .{key});
+        }
+
+        // continue with next events
+        previous_timestamp = timestamp;
+        events_count += 1;
+    } else |err| switch (err) {
+        error.EndOfStream => {
+            std.debug.print("End of file", .{});
+        },
+        else => return err,
+    }
+
 }
 
 pub fn main() !void {
@@ -348,8 +499,14 @@ pub fn main() !void {
     const app_window = glfw.glfwGetX11Window(@ptrCast(rl.getWindowHandle()));
     std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
 
-    const thread = try std.Thread.spawn(.{}, x11Listener, .{app_window});
-    _ = thread;
+    if (replay_events) {
+        const thread = try std.Thread.spawn(.{}, x11Producer, .{app_window});
+        _ = thread;
+    } else {
+        const thread = try std.Thread.spawn(.{}, x11Listener, .{app_window});
+        _ = thread;
+        //defer thread.join();
+    }
 
     // TODO: make this optional/configurable:
     rl.setWindowState(.{ .window_undecorated = true });
