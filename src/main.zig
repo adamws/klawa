@@ -154,6 +154,8 @@ const X11InputContext = struct {
     }
 };
 
+var run_x11_thread: bool = true;
+
 var keyboard: kle.Keyboard = undefined;
 var key_states: []KeyOnScreen = undefined;
 var keycode_keyboard_lookup = [_]i32{-1} ** 256;
@@ -285,7 +287,7 @@ fn x11Listener(app_window: x11.Window, record_file: ?[]const u8) !void {
 
 // uses events stored in file to reproduce them
 // assumes that only expected event types are recorded
-fn x11Producer(app_window: x11.Window, replay_file: []const u8) !void {
+fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !void {
     defer {
         std.debug.print("defer x11Producer\n", .{});
     }
@@ -298,6 +300,7 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8) !void {
     var input_ctx = try X11InputContext.init(display, app_window);
     defer input_ctx.deinit();
 
+    var run_loop = true;
     std.debug.print("Replay events from file\n", .{});
 
     // TODO: support full path of a file
@@ -306,49 +309,60 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8) !void {
     var buf_reader = std.io.bufferedReader(file.reader());
     const reader = buf_reader.reader();
 
-    // Simulate (approximately) timings of recorded events.
-    // This ignores effect of added delay due to the loop.
-    var events_count: usize = 0;
-    var timestamp: x11.Time = 0; // timestamp in x11 events is in milliseconds
-    var previous_timestamp: x11.Time = 0;
-    while (reader.readStruct(x11.XIDeviceEvent)) |device_event| {
-        timestamp = device_event.time;
-        const time_to_wait = timestamp - previous_timestamp;
-        // first would be large because it is in reference to x11 server start,
-        // delay only on 1..n event
-        if (events_count != 0 and time_to_wait != 0) {
-            std.time.sleep(time_to_wait * std.time.ns_per_ms);
+    out: while (run_loop) {
+        // Simulate (approximately) timings of recorded events.
+        // This ignores effect of added delay due to the loop.
+        var events_count: usize = 0;
+        var timestamp: x11.Time = 0; // timestamp in x11 events is in milliseconds
+        var previous_timestamp: x11.Time = 0;
+
+        while (reader.readStruct(x11.XIDeviceEvent)) |device_event| {
+            if (!run_x11_thread) {
+                break :out;
+            }
+            timestamp = device_event.time;
+            const time_to_wait = timestamp - previous_timestamp;
+            // first would be large because it is in reference to x11 server start,
+            // delay only on 1..n event
+            if (events_count != 0 and time_to_wait != 0) {
+                std.time.sleep(time_to_wait * std.time.ns_per_ms);
+            }
+
+            // do stuff with event-from-file
+            const keycode: usize = @intCast(device_event.detail);
+            const lookup: i32 = keycode_keyboard_lookup[keycode];
+            if (lookup >= 0) {
+                const index: usize = @intCast(lookup);
+                key_states[index].pressed = device_event.evtype == x11.XI_KeyPress;
+            }
+
+            if (device_event.evtype == x11.XI_KeyPress) {
+                last_char_timestamp = std.time.timestamp();
+                var key: KeyData = std.mem.zeroInit(KeyData, .{});
+                _ = input_ctx.lookupString(&device_event, &key);
+
+                while (!keys.push(key)) : ({
+                    // this is unlikely scenario - normal typing would not be fast enough
+                    std.debug.print("Consumer outpaced, try again\n", .{});
+                    std.time.sleep(10 * std.time.ns_per_ms);
+                }) {}
+                std.debug.print("Produced (fake): '{any}'\n", .{key});
+            }
+
+            // continue with next events
+            previous_timestamp = timestamp;
+            events_count += 1;
+        } else |err| switch (err) {
+            error.EndOfStream => {
+                std.debug.print("End of file", .{});
+                if (loop) {
+                    try file.seekTo(0);
+                } else {
+                    run_loop = false;
+                }
+            },
+            else => return err,
         }
-
-        // do stuff with event-from-file
-        const keycode: usize = @intCast(device_event.detail);
-        const lookup: i32 = keycode_keyboard_lookup[keycode];
-        if (lookup >= 0) {
-            const index: usize = @intCast(lookup);
-            key_states[index].pressed = device_event.evtype == x11.XI_KeyPress;
-        }
-
-        if (device_event.evtype == x11.XI_KeyPress) {
-            last_char_timestamp = std.time.timestamp();
-            var key: KeyData = std.mem.zeroInit(KeyData, .{});
-            _ = input_ctx.lookupString(&device_event, &key);
-
-            while (!keys.push(key)) : ({
-                // this is unlikely scenario - normal typing would not be fast enough
-                std.debug.print("Consumer outpaced, try again\n", .{});
-                std.time.sleep(10 * std.time.ns_per_ms);
-            }) {}
-            std.debug.print("Produced (fake): '{any}'\n", .{key});
-        }
-
-        // continue with next events
-        previous_timestamp = timestamp;
-        events_count += 1;
-    } else |err| switch (err) {
-        error.EndOfStream => {
-            std.debug.print("End of file", .{});
-        },
-        else => return err,
     }
 }
 
@@ -361,6 +375,7 @@ pub fn main() !void {
         \\-l, --layout <str>     Keyboard layout json file.
         \\    --record <str>     Record events to file.
         \\    --replay <str>     Replay events from file.
+        \\    --replay-loop      Loop replay action. When not set app will exit after replay ends.
         \\-h, --help             Display this help and exit.
         \\
     );
@@ -461,7 +476,8 @@ pub fn main() !void {
     var thread: ?std.Thread = null;
     if (res.args.replay) |replay_file| {
         // TODO: this will start processing events before rendering ready, add synchronization
-        thread = try std.Thread.spawn(.{}, x11Producer, .{ app_window, replay_file });
+        const loop = res.args.@"replay-loop" != 0;
+        thread = try std.Thread.spawn(.{}, x11Producer, .{ app_window, replay_file, loop });
     } else {
         // TODO: assign to thread var when close supported, join on this thread won't work now
         _ = try std.Thread.spawn(.{}, x11Listener, .{ app_window, res.args.record });
@@ -627,6 +643,9 @@ pub fn main() !void {
 
         rl.endDrawing();
     }
+
+    // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
+    run_x11_thread = false;
 
     std.debug.print("Exit\n", .{});
 }

@@ -8,6 +8,9 @@ run-record:
 run-replay:
   zig build run -- --replay events.txt
 
+run-replay-loop:
+  zig build run -- --replay events.txt --replay-loop
+
 test-kle:
   zig test src/kle.zig
 
