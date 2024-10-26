@@ -8,6 +8,9 @@ const x11 = @cImport({
     @cInclude("X11/extensions/XInput2.h");
 });
 
+const builtin = @import("builtin");
+const debug = (builtin.mode == std.builtin.OptimizeMode.Debug);
+
 const math = @import("math.zig");
 const kle = @import("kle.zig");
 const SpscQueue = @import("spsc_queue.zig").SpscQueue;
@@ -155,6 +158,7 @@ const X11InputContext = struct {
 };
 
 var run_x11_thread: bool = true;
+var x11_thread_active: bool = false;
 
 var keyboard: kle.Keyboard = undefined;
 var key_states: []KeyOnScreen = undefined;
@@ -204,7 +208,9 @@ fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
 fn x11Listener(app_window: x11.Window, record_file: ?[]const u8) !void {
     defer {
         std.debug.print("defer x11Listener\n", .{});
+        x11_thread_active = false;
     }
+    x11_thread_active = true;
 
     const display: *x11.Display = x11.XOpenDisplay(null) orelse {
         std.debug.print("Unable to connect to X server\n", .{});
@@ -294,7 +300,9 @@ fn x11Listener(app_window: x11.Window, record_file: ?[]const u8) !void {
 fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !void {
     defer {
         std.debug.print("defer x11Producer\n", .{});
+        x11_thread_active = false;
     }
+    x11_thread_active = true;
 
     const display: *x11.Display = x11.XOpenDisplay(null) orelse {
         std.debug.print("Unable to connect to X server\n", .{});
@@ -383,6 +391,7 @@ pub fn main() !void {
         \\    --record <str>     Record events to file.
         \\    --replay <str>     Replay events from file.
         \\    --replay-loop      Loop replay action. When not set app will exit after replay ends.
+        \\    --render <str>     Saves frames to directory. Works only with replay without loop.
         \\-h, --help             Display this help and exit.
         \\
     );
@@ -408,6 +417,12 @@ pub fn main() !void {
     } else {
         kle_str = try allocator.alloc(u8, kle_str_default.len);
         @memcpy(kle_str, kle_str_default);
+    }
+
+    if (res.args.render) |render_dir| {
+        // just checking if it exist
+        var dir = try std.fs.cwd().openDir(render_dir, .{});
+        dir.close();
     }
 
     const keyboard_parsed = try kle.parseFromSlice(allocator, kle_str);
@@ -536,6 +551,8 @@ pub fn main() !void {
 
     var codepoints_buffer = CodepointBuffer{};
 
+    var frame_cnt: usize = 0;
+
     rl.setTargetFPS(60);
 
     while (!exit_window) {
@@ -648,7 +665,38 @@ pub fn main() !void {
             }
         }
 
+        if (debug) {
+            rl.drawFPS(10, 10);
+        }
         rl.endDrawing();
+
+        if (res.args.render) |render_dir| {
+            var src: [255]u8 = undefined;
+            const src_slice = try std.fmt.bufPrintZ(&src, "frame{d}.png", .{frame_cnt});
+
+            // takes screenshot to current working dir, must move manually
+            rl.takeScreenshot(src_slice);
+
+            // TODO: to reassemble saved frames into better looking video we probably must
+            // store timing info because fps is not constant (drops significantly with this
+            // frame saving enabled)
+            var dst: [255]u8 = undefined;
+            const dst_slice = try std.fmt.bufPrint(
+                &dst,
+                "{s}/frame{:0>5}.png",
+                .{ render_dir, frame_cnt },
+            );
+
+            const cwd = std.fs.cwd();
+            try cwd.copyFile(src_slice, cwd, dst_slice, .{});
+            try cwd.deleteFile(src_slice);
+
+            if (!x11_thread_active) {
+                exit_window = true;
+            }
+        }
+
+        frame_cnt += 1;
     }
 
     // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
