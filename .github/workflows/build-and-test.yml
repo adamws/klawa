@@ -56,17 +56,24 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
-          sudo apt-get install ffmpeg xdotool xvfb
+          sudo apt-get install ffmpeg xdotool x11-apps xvfb
+      - name: Install python dependencies
+        shell: bash
+        run: |
+          cd tests
+          python -m venv .env
+          . .env/bin/activate
+          pip install -r dev-requirements.txt
       - name: Run tests
         shell: bash
         run: |
           chmod +x zig-out/bin/klawa
-          cd tests && ./test.sh
+          cd tests && . .env/bin/activate && python -m pytest -n auto src/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: output.webm
-          path: tests/output.webm
+          name: report
+          path: tests/report/
           retention-days: 2
           if-no-files-found: error
 
@@ -75,12 +82,16 @@ jobs:
     needs:
     - run-functional-tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./tests
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: output.webm
-          path: tests
+          name: report
+          path: tests/report
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
       - name: Pull Vercel Environment Information

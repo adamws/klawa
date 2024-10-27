@@ -1,0 +1,5 @@
+.env/
+.pytest_cache/
+.vercel/
+__pycache__/
+report/

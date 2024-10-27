@@ -564,6 +564,7 @@ pub fn main() !void {
         }
 
         if (keys.pop()) |k| {
+            if (k.symbol == null) continue;
             std.debug.print("Consumed: '{s}'\n", .{k.symbol});
 
             var text_: [*:0]const u8 = undefined;

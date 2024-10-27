@@ -1,5 +1,4 @@
 .cache/
+.env/
 .zig-cache/
 zig-out/
-tools/.env
-.vercel

@@ -1,4 +1,4 @@
 {
-  "buildCommand": "./tests/deploy.sh",
+  "buildCommand": "./deploy.sh",
   "outputDirectory": ".vercel/output"
 }

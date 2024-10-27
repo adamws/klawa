@@ -1,0 +1,6 @@
+Pillow==10.4.0
+pytest==8.3.0
+pytest-metadata==3.1.1
+pytest-html==4.1.1
+pytest-xdist==3.6.1
+PyVirtualDisplay==3.0
