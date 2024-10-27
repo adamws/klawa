@@ -1,7 +1,11 @@
 event_file := "events.bin"
+tracy_path := "/home/aws/git/tracy"
 
 run:
   zig build run
+
+run-tracy:
+  zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack
 
 run-record:
   rm events.txt
@@ -19,6 +23,11 @@ run-replay-render:
   zig build run -- --replay {{event_file}} --render render-out
   cd render-out && ffmpeg -framerate 60 -i "frame%05d.png" -c:v libvpx-vp9 output.webm
   mpv --loop render-out/output.webm
+
+run-replay-render-tracy:
+  rm -rf render-out
+  mkdir render-out
+  zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack -- --replay {{event_file}} --render render-out
 
 test-kle:
   zig test src/kle.zig

@@ -2,6 +2,7 @@ const clap = @import("clap");
 const rl = @import("raylib");
 const rgui = @import("raygui");
 const std = @import("std");
+const tracy = @import("tracy.zig");
 
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
@@ -365,7 +366,7 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
             events_count += 1;
         } else |err| switch (err) {
             error.EndOfStream => {
-                std.debug.print("End of file", .{});
+                std.debug.print("End of file\n", .{});
                 if (loop) {
                     try file.seekTo(0);
                     for (key_states, 0..) |_, i| {
@@ -382,6 +383,9 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
 }
 
 pub fn main() !void {
+    const trace_ = tracy.trace(@src());
+    defer trace_.end();
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -673,6 +677,7 @@ pub fn main() !void {
             rl.drawFPS(10, 10);
         }
         rl.endDrawing();
+        tracy.frameMark();
 
         if (res.args.render) |render_dir| {
             var src: [255]u8 = undefined;
