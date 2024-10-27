@@ -37,3 +37,6 @@ test-kle:
 
 test-queue:
   zig test src/spsc_queue.zig
+
+functional-tests:
+  cd tests && ./test.sh

@@ -21,10 +21,47 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
-          sudo apt-get install libxi-dev
+          sudo apt-get install libgl-dev libxi-dev \
+            libx11-dev xserver-xorg-dev xorg-dev
       # kle tests not triggered from main,
       # must figure out how to properly zig test
       - run: |
+          zig build
           zig build test
           zig test src/kle.zig
           zig test src/spsc_queue.zig
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: klawa
+          path: zig-out/bin/klawa
+          retention-days: 2
+          if-no-files-found: error
+
+  run-functional-tests:
+    name: Run functional tests
+    needs:
+    - build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: klawa
+          path: zig-out/bin
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt-get install ffmpeg xdotool xvfb
+      - name: Run tests
+        shell: bash
+        run: |
+          chmod +x zig-out/bin/klawa
+          cd tests && ./test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: output.webm
+          path: tests/output.webm
+          retention-days: 2
+          if-no-files-found: error

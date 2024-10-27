@@ -91,14 +91,16 @@ const X11InputContext = struct {
             return error.X11InitializationFailed;
         };
 
-        const xic = createIC(xim, .{
+        const xic = x11.XCreateIC(
+            xim,
             x11.XNInputStyle,
             x11.XIMPreeditNothing | x11.XIMStatusNothing,
             x11.XNClientWindow,
             window,
             x11.XNFocusWindow,
             window,
-        });
+            @as(usize, 0),
+        );
         if (xic == null) {
             std.debug.print("Cannot initialize input context\n", .{});
             return error.X11InitializationFailed;
@@ -109,18 +111,6 @@ const X11InputContext = struct {
             .xim = xim,
             .xic = xic,
         };
-    }
-
-    // This solves problem with calling x11.XCreateIC directly which cause segfault on Debug build
-    // (but works on ReleaseSafe build), don't ask me why. This problem started to occur when I
-    // moved these functions to this struct.
-    // Previously, when called directly in x11Listener, it worked.
-    // Taken from:
-    // https://ziggit.dev/t/calling-variadic-c-functions/2894
-    // NOTE: checked with zig 0.14 release. Maybe this become unnecessary later.
-    // NOTE2: this might not solve anything after all, after some recompiles crashes anyway
-    fn createIC(xim: x11.XIM, args: anytype) x11.XIC {
-        return @call(.auto, x11.XCreateIC, .{xim} ++ args);
     }
 
     pub fn deinit(self: *X11InputContext) void {
