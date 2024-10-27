@@ -680,19 +680,27 @@ pub fn main() !void {
         tracy.frameMark();
 
         if (res.args.render) |render_dir| {
+            const rendering = tracy.traceNamed(@src(), "render");
+            defer rendering.end();
+
+            // take .raw frames because encoding to other format in render loop takes too long,
+            // for example saving .png took ~68ms and .raw ony ~6ms
+            // TODO: integrate ffmpeg, right now frames are merged in separate step, frame size
+            // is hardcoded, won't work for non-default keyboard layout.
+            // This should *just* fetch pixel data (without even storing to file) and pass it
+            // to another thread where ffmpeg does its job.
             var src: [255]u8 = undefined;
-            const src_slice = try std.fmt.bufPrintZ(&src, "frame{d}.png", .{frame_cnt});
+            const src_slice = try std.fmt.bufPrintZ(&src, "frame{d}.raw", .{frame_cnt});
 
             // takes screenshot to current working dir, must move manually
             rl.takeScreenshot(src_slice);
 
             // TODO: to reassemble saved frames into better looking video we probably must
-            // store timing info because fps is not constant (drops significantly with this
-            // frame saving enabled)
+            // store timing info because fps might not be constant
             var dst: [255]u8 = undefined;
             const dst_slice = try std.fmt.bufPrint(
                 &dst,
-                "{s}/frame{:0>5}.png",
+                "{s}/frame{:0>5}.raw",
                 .{ render_dir, frame_cnt },
             );
 
