@@ -8,7 +8,7 @@ run-tracy:
   zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack
 
 run-record:
-  rm events.txt
+  rm -f {{event_file}}
   zig build run -- --record {{event_file}}
 
 run-replay:

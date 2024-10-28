@@ -2,6 +2,7 @@ const clap = @import("clap");
 const rl = @import("raylib");
 const rgui = @import("raygui");
 const std = @import("std");
+const fs = std.fs;
 const tracy = @import("tracy.zig");
 
 const x11 = @cImport({
@@ -215,9 +216,9 @@ fn x11Listener(app_window: x11.Window, record_file: ?[]const u8) !void {
     // TODO: use buffered writer, to do that we must gracefully handle this thread exit,
     // otherwise there is no good place to ensure writer flush
     // TODO: support full file path
-    var event_file: ?std.fs.File = null;
+    var event_file: ?fs.File = null;
     if (record_file) |filename| {
-        const cwd = std.fs.cwd();
+        const cwd = fs.cwd();
         event_file = try cwd.createFile(filename, .{});
     }
     defer event_file.?.close();
@@ -307,7 +308,7 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
     std.debug.print("Replay events from file\n", .{});
 
     // TODO: support full path of a file
-    const file = try std.fs.cwd().openFile(replay_file, .{});
+    const file = try fs.cwd().openFile(replay_file, .{});
     defer file.close();
     var buf_reader = std.io.bufferedReader(file.reader());
     const reader = buf_reader.reader();
@@ -399,24 +400,32 @@ pub fn main() !void {
         });
     }
 
+    // argument validation
+
+    if (res.args.replay) |replay_file| {
+        // just checking if it exist
+        const f = try fs.cwd().openFile(replay_file, .{});
+        f.close();
+    }
+
+    if (res.args.render) |render_dir| {
+        // just checking if it exist
+        var dir = try fs.cwd().openDir(render_dir, .{});
+        dir.close();
+    }
+
     const kle_str_default = @embedFile("resources/keyboard-layout.json");
     var kle_str: []u8 = undefined;
 
     if (res.args.layout) |n| {
         std.debug.print("--layout = {s}\n", .{n});
-        var layout_file = try std.fs.cwd().openFile(n, .{});
+        var layout_file = try fs.cwd().openFile(n, .{});
         defer layout_file.close();
         const file_size = (try layout_file.stat()).size;
-        kle_str = try std.fs.cwd().readFileAlloc(allocator, n, file_size);
+        kle_str = try fs.cwd().readFileAlloc(allocator, n, file_size);
     } else {
         kle_str = try allocator.alloc(u8, kle_str_default.len);
         @memcpy(kle_str, kle_str_default);
-    }
-
-    if (res.args.render) |render_dir| {
-        // just checking if it exist
-        var dir = try std.fs.cwd().openDir(render_dir, .{});
-        dir.close();
     }
 
     const keyboard_parsed = try kle.parseFromSlice(allocator, kle_str);
@@ -695,7 +704,7 @@ pub fn main() !void {
                 .{ render_dir, frame_cnt },
             );
 
-            const cwd = std.fs.cwd();
+            const cwd = fs.cwd();
             try cwd.copyFile(src_slice, cwd, dst_slice, .{});
             try cwd.deleteFile(src_slice);
 
