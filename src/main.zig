@@ -3,6 +3,7 @@ const rl = @import("raylib");
 const rgui = @import("raygui");
 const std = @import("std");
 const fs = std.fs;
+const process = std.process;
 const tracy = @import("tracy.zig");
 
 const x11 = @cImport({
@@ -19,8 +20,22 @@ const SpscQueue = @import("spsc_queue.zig").SpscQueue;
 
 const glfw = struct {
     pub const GLFWwindow = opaque {};
-    // this should be exported in libraylib.a:
-    pub extern fn glfwGetX11Window(window: ?*GLFWwindow) x11.Window;
+    // these should be exported in libraylib.a:
+    pub extern "c" fn glfwGetX11Window(window: ?*GLFWwindow) x11.Window;
+    pub const getX11Window = glfwGetX11Window;
+};
+
+const gl = struct {
+    pub const PixelFormat = enum(c_uint) {
+        rgba = 0x1908,
+    };
+    pub const PixelType = enum(c_uint) {
+        unsigned_byte = 0x1401,
+    };
+
+    // these should be exported in libraylib.a:
+    pub extern "c" fn glReadPixels(x: c_int, y: c_int, width: c_int, height: c_int, format: PixelFormat, @"type": PixelType, data: [*c]u8) void;
+    pub const readPixels = glReadPixels;
 };
 
 const KEY_1U_PX = 64;
@@ -386,7 +401,7 @@ pub fn main() !void {
         \\    --record <str>     Record events to file.
         \\    --replay <str>     Replay events from file.
         \\    --replay-loop      Loop replay action. When not set app will exit after replay ends.
-        \\    --render <str>     Saves frames to directory. Works only with replay without loop.
+        \\    --render <str>     Saves frames to file. Works only with replay without loop.
         \\-h, --help             Display this help and exit.
         \\
     );
@@ -408,11 +423,16 @@ pub fn main() !void {
         f.close();
     }
 
-    if (res.args.render) |render_dir| {
-        // just checking if it exist
-        var dir = try fs.cwd().openDir(render_dir, .{});
-        dir.close();
+    var frames_file: fs.File = undefined;
+    if (res.args.render) |render_file| {
+        const cwd = fs.cwd();
+        frames_file = try cwd.createFile(
+            render_file,
+            .{ .read = true },
+        );
     }
+    defer frames_file.close();
+
 
     const kle_str_default = @embedFile("resources/keyboard-layout.json");
     var kle_str: []u8 = undefined;
@@ -495,10 +515,17 @@ pub fn main() !void {
     rl.initWindow(width, height, "klawa");
     defer rl.closeWindow();
 
+    // to be used when rendering enable
+    var pixels: []u8 = undefined;
+    if (res.args.render) |_| {
+        pixels = try allocator.alloc(u8, @as(usize, @intCast(width * height)) * 4);
+    }
+    defer allocator.free(pixels);
+
     const monitor_refreshrate = rl.getMonitorRefreshRate(rl.getCurrentMonitor());
     std.debug.print("Current monitor refresh rate: {}\n", .{monitor_refreshrate});
 
-    const app_window = glfw.glfwGetX11Window(@ptrCast(rl.getWindowHandle()));
+    const app_window = glfw.getX11Window(@ptrCast(rl.getWindowHandle()));
     std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
 
     // TODO: is this even needed?
@@ -679,34 +706,24 @@ pub fn main() !void {
         rl.endDrawing();
         tracy.frameMark();
 
-        if (res.args.render) |render_dir| {
+        if (res.args.render) |_| {
             const rendering = tracy.traceNamed(@src(), "render");
             defer rendering.end();
 
-            // take .raw frames because encoding to other format in render loop takes too long,
-            // for example saving .png took ~68ms and .raw ony ~6ms
-            // TODO: integrate ffmpeg, right now frames are merged in separate step, frame size
-            // is hardcoded, won't work for non-default keyboard layout.
-            // This should *just* fetch pixel data (without even storing to file) and pass it
-            // to another thread where ffmpeg does its job.
-            var src: [255]u8 = undefined;
-            const src_slice = try std.fmt.bufPrintZ(&src, "frame{d}.raw", .{frame_cnt});
-
-            // takes screenshot to current working dir, must move manually
-            rl.takeScreenshot(src_slice);
-
             // TODO: to reassemble saved frames into better looking video we probably must
             // store timing info because fps might not be constant
-            var dst: [255]u8 = undefined;
-            const dst_slice = try std.fmt.bufPrint(
-                &dst,
-                "{s}/frame{:0>5}.raw",
-                .{ render_dir, frame_cnt },
+
+            gl.readPixels(
+                0,
+                0,
+                rl.getScreenWidth(),
+                rl.getScreenHeight(),
+                .rgba,
+                .unsigned_byte,
+                @ptrCast(pixels),
             );
 
-            const cwd = fs.cwd();
-            try cwd.copyFile(src_slice, cwd, dst_slice, .{});
-            try cwd.deleteFile(src_slice);
+            _ = try frames_file.write(pixels);
 
             if (!x11_thread_active) {
                 exit_window = true;
@@ -718,6 +735,38 @@ pub fn main() !void {
 
     // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
     run_x11_thread = false;
+
+    // TODO: would be better if we start this earlier and pipe frames as they come,
+    // would avoid storing files to filesystem
+    if (res.args.render) |_| {
+        const args =[_][]const u8{
+            "ffmpeg", "-y",
+            "-f", "rawvideo",
+            "-framerate", "60",
+            "-s", "960x320",
+            "-pix_fmt", "rgba",
+            "-i", "frames.raw",
+            "-vf", "vflip",
+            "-c:v", "libvpx-vp9",
+            "output.webm",
+        };
+
+        var ffmpeg = process.Child.init(&args, allocator);
+        ffmpeg.stdout_behavior = .Inherit;
+
+        try ffmpeg.spawn();
+
+        const term = try ffmpeg.wait();
+        switch (term) {
+            .Exited => |code| {
+                std.debug.print("ffmpeg exited with '{d}'\n", .{code});
+            },
+            .Signal, .Stopped, .Unknown => |code| {
+                std.debug.print("ffmpeg stopped with '{d}'\n", .{code});
+            },
+        }
+
+    }
 
     std.debug.print("Exit\n", .{});
 }

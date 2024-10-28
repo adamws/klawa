@@ -18,19 +18,13 @@ run-replay-loop:
   zig build run -- --replay {{event_file}} --replay-loop
 
 run-replay-render:
-  rm -rf render-out
-  mkdir render-out
-  zig build run -- --replay {{event_file}} --render render-out
-  just render
+  rm -rf frames.raw
+  zig build run -- --replay {{event_file}} --render frames.raw
+  mpv --loop output.webm
 
 run-replay-render-tracy:
-  rm -rf render-out
-  mkdir render-out
-  zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack -- --replay {{event_file}} --render render-out
-
-render:
-  cd render-out && ffmpeg -framerate 60 -s 960x320 -pix_fmt rgba -i "frame%05d.raw" -c:v libvpx-vp9 output.webm
-  mpv --loop render-out/output.webm
+  rm -rf frames.raw
+  zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack -- --replay {{event_file}} --render frames.raw
 
 test-kle:
   zig test src/kle.zig

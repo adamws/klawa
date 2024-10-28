@@ -113,24 +113,7 @@ def app_isolation(tmpdir, app_path):
         new_path = shutil.copy(app_path, tmpdir)
         logger.info(f"New app path: {new_path}")
 
-        app_dir = Path(new_path).parent
-        os.mkdir(app_dir / "render-out")
-
         yield new_path
-
-        # will be a part of klawa some day:
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-framerate", "60",
-                "-s", "960x320",
-                "-pix_fmt", "rgba",
-                "-i", "frame%05d.raw",
-                "-c:v", "libvpx-vp9",
-                "../output.webm",
-            ],
-            cwd=app_dir / "render-out",
-        )
 
     yield _isolation
 
@@ -183,6 +166,6 @@ def test_record_and_render(app_isolation, text: str) -> None:
         thread.join()
 
         run_process_capture_logs(
-            [app, "--replay", "events.bin", "--render", "render-out"],
+            [app, "--replay", "events.bin", "--render", "frames.raw"],
             app_dir,
         )
