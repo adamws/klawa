@@ -19,12 +19,12 @@ run-replay-loop:
 
 run-replay-render:
   rm -rf frames.raw
-  zig build run -- --replay {{event_file}} --render frames.raw
+  zig build run -- --replay {{event_file}} --render output.webm
   mpv --loop output.webm
 
 run-replay-render-tracy:
   rm -rf frames.raw
-  zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack -- --replay {{event_file}} --render frames.raw
+  zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack -- --replay {{event_file}} --render output.webm
 
 test-kle:
   zig test src/kle.zig

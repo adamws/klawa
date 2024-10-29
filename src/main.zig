@@ -3,7 +3,6 @@ const rl = @import("raylib");
 const rgui = @import("raygui");
 const std = @import("std");
 const fs = std.fs;
-const process = std.process;
 const tracy = @import("tracy.zig");
 
 const x11 = @cImport({
@@ -16,6 +15,8 @@ const debug = (builtin.mode == std.builtin.OptimizeMode.Debug);
 
 const math = @import("math.zig");
 const kle = @import("kle.zig");
+
+const Ffmpeg = @import("ffmpeg.zig").Ffmpeg;
 const SpscQueue = @import("spsc_queue.zig").SpscQueue;
 
 const glfw = struct {
@@ -401,7 +402,7 @@ pub fn main() !void {
         \\    --record <str>     Record events to file.
         \\    --replay <str>     Replay events from file.
         \\    --replay-loop      Loop replay action. When not set app will exit after replay ends.
-        \\    --render <str>     Saves frames to file. Works only with replay without loop.
+        \\    --render <str>     Render frames to video file. Works only with replay without loop.
         \\-h, --help             Display this help and exit.
         \\
     );
@@ -422,17 +423,6 @@ pub fn main() !void {
         const f = try fs.cwd().openFile(replay_file, .{});
         f.close();
     }
-
-    var frames_file: fs.File = undefined;
-    if (res.args.render) |render_file| {
-        const cwd = fs.cwd();
-        frames_file = try cwd.createFile(
-            render_file,
-            .{ .read = true },
-        );
-    }
-    defer frames_file.close();
-
 
     const kle_str_default = @embedFile("resources/keyboard-layout.json");
     var kle_str: []u8 = undefined;
@@ -510,6 +500,12 @@ pub fn main() !void {
     const width: c_int = @intFromFloat(bbox.w * KEY_1U_PX);
     const height: c_int = @intFromFloat(bbox.h * KEY_1U_PX);
     std.debug.print("Canvas: {}x{}\n", .{ width, height });
+
+    var renderer: ?Ffmpeg = null;
+    if (res.args.render) |dst| {
+        // TODO: check if ffmpeg installed
+        renderer = try Ffmpeg.spawn(@intCast(width), @intCast(height), dst, allocator);
+    }
 
     rl.setConfigFlags(.{ .msaa_4x_hint = true, .vsync_hint = true, .window_highdpi = true });
     rl.initWindow(width, height, "klawa");
@@ -706,12 +702,12 @@ pub fn main() !void {
         rl.endDrawing();
         tracy.frameMark();
 
-        if (res.args.render) |_| {
+        if (renderer) |*r| {
             const rendering = tracy.traceNamed(@src(), "render");
             defer rendering.end();
 
             // TODO: to reassemble saved frames into better looking video we probably must
-            // store timing info because fps might not be constant
+            // pipe timing info because fps might not be constant (is even possible?)
 
             gl.readPixels(
                 0,
@@ -723,7 +719,7 @@ pub fn main() !void {
                 @ptrCast(pixels),
             );
 
-            _ = try frames_file.write(pixels);
+            try r.write(pixels);
 
             if (!x11_thread_active) {
                 exit_window = true;
@@ -736,37 +732,7 @@ pub fn main() !void {
     // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
     run_x11_thread = false;
 
-    // TODO: would be better if we start this earlier and pipe frames as they come,
-    // would avoid storing files to filesystem
-    if (res.args.render) |_| {
-        const args =[_][]const u8{
-            "ffmpeg", "-y",
-            "-f", "rawvideo",
-            "-framerate", "60",
-            "-s", "960x320",
-            "-pix_fmt", "rgba",
-            "-i", "frames.raw",
-            "-vf", "vflip",
-            "-c:v", "libvpx-vp9",
-            "output.webm",
-        };
-
-        var ffmpeg = process.Child.init(&args, allocator);
-        ffmpeg.stdout_behavior = .Inherit;
-
-        try ffmpeg.spawn();
-
-        const term = try ffmpeg.wait();
-        switch (term) {
-            .Exited => |code| {
-                std.debug.print("ffmpeg exited with '{d}'\n", .{code});
-            },
-            .Signal, .Stopped, .Unknown => |code| {
-                std.debug.print("ffmpeg stopped with '{d}'\n", .{code});
-            },
-        }
-
-    }
+    if (renderer) |*r| try r.wait();
 
     std.debug.print("Exit\n", .{});
 }

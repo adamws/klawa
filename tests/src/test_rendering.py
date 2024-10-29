@@ -166,6 +166,6 @@ def test_record_and_render(app_isolation, text: str) -> None:
         thread.join()
 
         run_process_capture_logs(
-            [app, "--replay", "events.bin", "--render", "frames.raw"],
+            [app, "--replay", "events.bin", "--render", "output.webm"],
             app_dir,
         )
