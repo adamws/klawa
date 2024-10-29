@@ -502,21 +502,18 @@ pub fn main() !void {
     std.debug.print("Canvas: {}x{}\n", .{ width, height });
 
     var renderer: ?Ffmpeg = null;
+    var pixels: ?[]u8 = null;
     if (res.args.render) |dst| {
         // TODO: check if ffmpeg installed
         renderer = try Ffmpeg.spawn(@intCast(width), @intCast(height), dst, allocator);
+        pixels = try allocator.alloc(u8, @as(usize, @intCast(width * height)) * 4);
     }
+    defer if (pixels) |p| allocator.free(p);
+
 
     rl.setConfigFlags(.{ .msaa_4x_hint = true, .vsync_hint = true, .window_highdpi = true });
     rl.initWindow(width, height, "klawa");
     defer rl.closeWindow();
-
-    // to be used when rendering enable
-    var pixels: []u8 = undefined;
-    if (res.args.render) |_| {
-        pixels = try allocator.alloc(u8, @as(usize, @intCast(width * height)) * 4);
-    }
-    defer allocator.free(pixels);
 
     const monitor_refreshrate = rl.getMonitorRefreshRate(rl.getCurrentMonitor());
     std.debug.print("Current monitor refresh rate: {}\n", .{monitor_refreshrate});
@@ -716,10 +713,10 @@ pub fn main() !void {
                 rl.getScreenHeight(),
                 .rgba,
                 .unsigned_byte,
-                @ptrCast(pixels),
+                @ptrCast(pixels.?),
             );
 
-            try r.write(pixels);
+            try r.write(pixels.?);
 
             if (!x11_thread_active) {
                 exit_window = true;
