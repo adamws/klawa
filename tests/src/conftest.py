@@ -1,9 +1,12 @@
 import glob
+import logging
 import os
 import shutil
 from pathlib import Path
 
 import pytest
+
+logger = logging.getLogger(__name__)
 
 
 def pytest_addoption(parser) -> None:
@@ -20,6 +23,14 @@ def app_path(request) -> Path:
     app_path = request.config.getoption("--app-path")
     assert app_path, "App path is required"
     return Path(os.path.realpath(app_path))
+
+
+@pytest.fixture
+def data_dir(request):
+    test_dir = Path(request.module.__file__).parent
+    data_dir = test_dir.parent / "data"
+    logger.info(f"Test data directory: {data_dir}")
+    return data_dir
 
 
 @pytest.hookimpl(hookwrapper=True)

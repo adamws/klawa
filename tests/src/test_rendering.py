@@ -107,11 +107,14 @@ def screen_manager():
 
 
 @pytest.fixture
-def app_isolation(tmpdir, app_path):
+def app_isolation(tmpdir, app_path, data_dir):
     @contextmanager
-    def _isolation():
+    def _isolation(layout_file: str):
         new_path = shutil.copy(app_path, tmpdir)
         logger.info(f"New app path: {new_path}")
+
+        if layout_file:
+            shutil.copy(data_dir / layout_file, tmpdir)
 
         yield new_path
 
@@ -145,8 +148,15 @@ def run_process_capture_logs(command, cwd, name="", process_holder=None) -> None
         "Dość błazeństw, żrą mój pęk luźnych fig",
     ],
 )
-def test_record_and_render(app_isolation, text: str) -> None:
-    with app_isolation() as app:
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "", # default
+        "atreus.json",
+    ],
+)
+def test_record_and_render(app_isolation, text: str, layout: str) -> None:
+    with app_isolation(layout) as app:
         app_dir = Path(app).parent
         processes = {}
 
@@ -165,7 +175,7 @@ def test_record_and_render(app_isolation, text: str) -> None:
 
         thread.join()
 
-        run_process_capture_logs(
-            [app, "--replay", "events.bin", "--render", "output.webm"],
-            app_dir,
-        )
+        args = [app, "--replay", "events.bin", "--render", "output.webm"]
+        if layout:
+            args.extend(["--layout", layout])
+        run_process_capture_logs(args, app_dir)
