@@ -68,7 +68,9 @@ jobs:
         shell: bash
         run: |
           chmod +x zig-out/bin/klawa
-          cd tests && . .env/bin/activate && python -m pytest -n auto src/
+          # not running with pytest-xdist because renders are way off
+          # when framerate drops below expected 60fps:
+          cd tests && . .env/bin/activate && python -m pytest src/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
