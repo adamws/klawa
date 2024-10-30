@@ -178,11 +178,82 @@ var last_char_timestamp: i64 = 0;
 
 // https://github.com/bits/UTF-8-Unicode-Test-Documents/blob/master/UTF-8_sequence_unseparated/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt
 const text = @embedFile("resources/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt");
-// TODO: symbols subsitution should be configurable, not all fonts will have these:
-const symbols = "↚";
+
+const SymbolsLookupKV = struct { []const u8, [:0]const u8 };
+// TODO: symbols subsitution should be configurable
+const symbols_lookup_slice = [_]SymbolsLookupKV{
+    // zig fmt: off
+    .{ "Escape",       "Esc"     },
+    .{ "Tab",          "↹"       },
+    .{ "ISO_Left_Tab", "↹"       },
+    .{ "Return",       "⏎"       },
+    .{ "space",        "␣"       },
+    .{ "BackSpace",    "⌫"       },
+    .{ "Caps_Lock",    "Caps"    },
+    .{ "F1",           "F1"      },
+    .{ "F2",           "F2"      },
+    .{ "F3",           "F3"      },
+    .{ "F4",           "F4"      },
+    .{ "F5",           "F5"      },
+    .{ "F6",           "F6"      },
+    .{ "F7",           "F7"      },
+    .{ "F8",           "F8"      },
+    .{ "F9",           "F9"      },
+    .{ "F10",          "F10"     },
+    .{ "F11",          "F11"     },
+    .{ "F12",          "F12"     },
+    .{ "Up",           "↑"       },
+    .{ "Left",         "←"       },
+    .{ "Right",        "→"       },
+    .{ "Down",         "↓"       },
+    .{ "Prior",        "PgUp"    },
+    .{ "Next",         "PgDn"    },
+    .{ "Home",         "Home"    },
+    .{ "End",          "End"     },
+    .{ "Insert",       "Ins"     },
+    .{ "Delete",       "Del"     },
+    .{ "KP_End",       "1ᴷᴾ"     },
+    .{ "KP_Down",      "2ᴷᴾ"     },
+    .{ "KP_Next",      "3ᴷᴾ"     },
+    .{ "KP_Left",      "4ᴷᴾ"     },
+    .{ "KP_Begin",     "5ᴷᴾ"     },
+    .{ "KP_Right",     "6ᴷᴾ"     },
+    .{ "KP_Home",      "7ᴷᴾ"     },
+    .{ "KP_Up",        "8ᴷᴾ"     },
+    .{ "KP_Prior",     "9ᴷᴾ"     },
+    .{ "KP_Insert",    "0ᴷᴾ"     },
+    .{ "KP_Delete",    "(.)"     },
+    .{ "KP_Add",       "(+)"     },
+    .{ "KP_Subtract",  "(-)"     },
+    .{ "KP_Multiply",  "(*)"     },
+    .{ "KP_Divide",    "(/)"     },
+    .{ "KP_Enter",     "⏎"       },
+    .{ "KP_1",         "1ᴷᴾ"     },
+    .{ "KP_2",         "2ᴷᴾ"     },
+    .{ "KP_3",         "3ᴷᴾ"     },
+    .{ "KP_4",         "4ᴷᴾ"     },
+    .{ "KP_5",         "5ᴷᴾ"     },
+    .{ "KP_6",         "6ᴷᴾ"     },
+    .{ "KP_7",         "7ᴷᴾ"     },
+    .{ "KP_8",         "8ᴷᴾ"     },
+    .{ "KP_9",         "9ᴷᴾ"     },
+    .{ "KP_0",         "0ᴷᴾ"     },
+    .{ "Num_Lock",     "NumLck"  },
+    .{ "Scroll_Lock",  "ScrLck"  },
+    .{ "Pause",        "Pause"   },
+    .{ "Break",        "Break"   },
+    .{ "Print",        "Print"   },
+    .{ "Multi_key",    "Compose" },
+    // zig fmt: on
+};
+const symbols_lookup = std.StaticStringMap([:0]const u8).initComptime(symbols_lookup_slice);
+const symbols = "↚↹⏎␣⌫↑←→↓ᴷᴾ⏎";
 const all_text = text ++ symbols;
 
-const font_data = @embedFile("resources/Hack-Regular.ttf");
+// it contains all current sumstitutions symbols:
+// TODO: font discovery with fallbacks when glyph not found
+// TODO: support for non-monospaced fonts
+const font_data = @embedFile("resources/DejaVuSansMono.ttf");
 
 fn updateKeyStates(keycode: usize, pressed: bool) void {
     const lookup: i32 = keycode_keyboard_lookup[keycode];
@@ -597,13 +668,10 @@ pub fn main() !void {
             std.debug.print("Consumed: '{s}'\n", .{k.symbol});
 
             var text_: [*:0]const u8 = undefined;
-            // TODO: create comptime symbol lookup table and use it here:
-            if (std.mem.eql(u8, std.mem.sliceTo(k.symbol, 0), "BackSpace")) {
-                std.debug.print(
-                    "replacement for {s} would happen \n",
-                    .{k.symbol},
-                );
-                text_ = "↚";
+
+            if (symbols_lookup.get(std.mem.sliceTo(k.symbol, 0))) |symbol| {
+                std.debug.print("Replacement: '{s}'\n", .{symbol});
+                text_ = symbol;
             } else {
                 text_ = @ptrCast(&k.string);
             }
