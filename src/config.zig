@@ -5,6 +5,7 @@ const ini = @import("ini.zig");
 pub const ConfigData = struct {
     typing_font_size: i32 = 120,
     layout_path: []const u8 = "", // absolute or realative to config file
+    show_typing: bool = true,
 };
 
 pub const AppConfg = struct {
@@ -33,11 +34,11 @@ pub const AppConfg = struct {
                         inline for (config_fields) |field| {
                             if (std.mem.eql(u8, field.name, kv.key)) {
                                 switch (@typeInfo(field.type)) {
+                                    .Bool => {
+                                        @field(config, field.name) = try parseBool(kv.value);
+                                    },
                                     .Int => {
-                                        // TODO: only decimal values are handled now, could
-                                        // implement automatic detection and handling based on
-                                        // prefix
-                                        @field(config, field.name) = try std.fmt.parseInt(i32, kv.value, 10);
+                                        @field(config, field.name) = try std.fmt.parseInt(i32, kv.value, 0);
                                     },
                                     .Pointer => {
                                         @field(config, field.name) = try allocator.dupe(u8, kv.value);
@@ -77,3 +78,22 @@ pub const AppConfg = struct {
         self.* = undefined;
     }
 };
+
+pub const ParseBoolError = error{
+    /// The input was empty or contained an invalid character
+    InvalidCharacter,
+};
+
+fn parseBool(buf: []const u8) ParseBoolError!bool {
+    inline for (.{
+        .{ .s = "true", .r = true },
+        .{ .s = "1", .r = true },
+        .{ .s = "false", .r = false },
+        .{ .s = "0", .r = false },
+    }) |tc| {
+        if (std.ascii.eqlIgnoreCase(buf, tc.s)) {
+            return tc.r;
+        }
+    }
+    return ParseBoolError.InvalidCharacter;
+}

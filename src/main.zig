@@ -510,6 +510,7 @@ pub fn main() !void {
 
     const typing_font_size = app_config.data.typing_font_size;
     const layout_path = app_config.data.layout_path;
+    const show_typing = app_config.data.show_typing;
 
     // argument validation
 
@@ -672,9 +673,6 @@ pub fn main() !void {
     const exit_label = "Exit Application";
     const exit_text_width = rl.measureText(exit_label, default_font.baseSize);
 
-    var show_typing = true;
-    const show_typing_label = "Show typed characters";
-
     const typing_persistance_sec = 2;
 
     var codepoints_buffer = CodepointBuffer{};
@@ -763,17 +761,6 @@ pub fn main() !void {
                 width,
                 height,
                 rl.Color{ .r = 255, .g = 255, .b = 255, .a = 196 },
-            );
-
-            _ = rgui.guiCheckBox(
-                .{
-                    .x = 16,
-                    .y = 16,
-                    .width = 32,
-                    .height = 32,
-                },
-                show_typing_label,
-                &show_typing,
             );
 
             if (1 == rgui.guiButton(
