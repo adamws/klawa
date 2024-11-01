@@ -33,4 +33,10 @@ test-queue:
   zig test src/spsc_queue.zig
 
 pytest:
-  cd tests && . .env/bin/activate && python -m pytest -n auto src/
+  # TODO: enable -n auto when rendering with low framerate fixed
+  cd tests && . .env/bin/activate && python -m pytest src/
+
+run-atlas-generator:
+  cd tools/atlas-generator && zig build run -- --keycap ../../src/resources/keycaps_kle.png --output ../../src/resources/keycaps_kle_atlas.png
+  cd tools/atlas-generator && zig build run -- --keycap ../../src/resources/keycaps_kle_with_gaps.png --output ../../src/resources/keycaps_kle_with_gaps_atlas.png
+  cd tools/atlas-generator && zig build run -- --keycap ../../src/resources/keycaps_vortex_pok3r.png --output ../../src/resources/keycaps_vortex_pok3r_atlas.png

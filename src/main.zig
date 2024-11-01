@@ -48,6 +48,25 @@ pub const known_folders_config = .{
 
 const KEY_1U_PX = 64;
 
+pub const Theme = enum {
+    kle,
+    vortex_pok3r,
+
+    const keycaps_kle_data = @embedFile("resources/keycaps_kle_with_gaps_atlas.png");
+    const keycaps_vortex_pok3r_data = @embedFile("resources/keycaps_vortex_pok3r_atlas.png");
+
+    pub fn getData(self: Theme) []const u8 {
+        return switch (self) {
+            .kle => keycaps_kle_data,
+            .vortex_pok3r => keycaps_vortex_pok3r_data,
+        };
+    }
+
+    pub fn fromString(value: []const u8) ?Theme {
+        return std.meta.stringToEnum(Theme, value);
+    }
+};
+
 const KeyOnScreen = struct {
     src: rl.Rectangle,
     dst: rl.Rectangle,
@@ -508,8 +527,10 @@ pub fn main() !void {
     var app_config = try config.AppConfg.init(allocator, config_path);
     defer app_config.deinit();
 
-    const typing_font_size = app_config.data.typing_font_size;
+    const typing_font_size: i32 = @intCast(app_config.data.typing_font_size);
+    const typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
     const layout_path = app_config.data.layout_path;
+    const theme_name = app_config.data.theme;
     const show_typing = app_config.data.show_typing;
 
     // argument validation
@@ -576,10 +597,14 @@ pub fn main() !void {
         s.angle = @floatCast(k.rotation_angle);
 
         // special case: iso enter
+        // TODO: calculate, not hardcode
         if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
-            s.src.x = 2 * KEY_1U_PX;
-            s.src.y = 0;
+            s.src.x = 0;
+            s.src.y = 1728;
             s.dst.x -= 0.25 * KEY_1U_PX;
+        } else if (k.width == 1.0 and k.height == 2.0) {
+            s.src.x = 0;
+            s.src.y = 1728 - 64;
         }
 
         s.pressed = false;
@@ -643,7 +668,8 @@ pub fn main() !void {
 
     rl.setExitKey(rl.KeyboardKey.key_null);
 
-    const keycaps = @embedFile("resources/keycaps.png");
+    const theme = Theme.fromString(theme_name) orelse unreachable;
+    const keycaps = theme.getData();
     const keycaps_image = rl.loadImageFromMemory(".png", keycaps);
     const keycap_texture = rl.loadTextureFromImage(keycaps_image);
     defer rl.unloadTexture(keycap_texture);
@@ -711,21 +737,18 @@ pub fn main() !void {
         }
 
         rl.beginDrawing();
-        rl.clearBackground(rl.Color.white);
+        // TODO: background color should be configurable
+        // TODO: research window transparency
+        rl.clearBackground(rl.Color.black);
 
         const rot = rl.Vector2{ .x = 0, .y = 0 };
 
         for (key_states) |k| {
-            rl.drawTexturePro(keycap_texture, k.src, k.dst, rot, k.angle, rl.Color.white);
-
-            if (k.pressed) {
-                rl.drawRectanglePro(
-                    k.dst,
-                    rot,
-                    k.angle,
-                    rl.Color{ .r = 255, .g = 0, .b = 0, .a = 128 },
-                );
-            }
+            var dst = k.dst;
+            if (k.pressed) dst.y += 5;
+            // TODO: tint color should be configurable
+            const tint = if (k.pressed) rl.Color.red else rl.Color.white;
+            rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
         }
 
         if (show_typing and std.time.timestamp() - last_char_timestamp <= typing_persistance_sec) {
@@ -748,7 +771,7 @@ pub fn main() !void {
                         .y = @floatFromInt(@divTrunc(height - typing_font_size, 2)),
                     },
                     @floatFromInt(typing_font_size),
-                    rl.Color.black,
+                    typing_font_color,
                 );
                 offset += typing_glyph_width + 20;
             }
@@ -816,3 +839,4 @@ pub fn main() !void {
 
     std.debug.print("Exit\n", .{});
 }
+

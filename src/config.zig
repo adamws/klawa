@@ -3,17 +3,21 @@ const fs = std.fs;
 const ini = @import("ini.zig");
 
 pub const ConfigData = struct {
-    typing_font_size: i32 = 120,
+    typing_font_size: u32 = 120,
+    typing_font_color: u32 = 0x000000ff, // alpha=1
     layout_path: []const u8 = "", // absolute or realative to config file
+    theme: []const u8 = "kle",
     show_typing: bool = true,
 };
 
 pub const AppConfg = struct {
     allocator: std.mem.Allocator,
     data: ConfigData,
+    dups: std.ArrayList([]u8),
 
     pub fn init(allocator: std.mem.Allocator, path: []const u8) !AppConfg {
         var config: ConfigData = std.mem.zeroInit(ConfigData, .{});
+        var dups = std.ArrayList([]u8).init(allocator);
 
         if (fs.cwd().openFile(path, .{ .mode = .read_only })) |file| {
             defer file.close();
@@ -38,10 +42,13 @@ pub const AppConfg = struct {
                                         @field(config, field.name) = try parseBool(kv.value);
                                     },
                                     .Int => {
-                                        @field(config, field.name) = try std.fmt.parseInt(i32, kv.value, 0);
+                                        // TODO: handle different int types:
+                                        @field(config, field.name) = try std.fmt.parseInt(u32, kv.value, 0);
                                     },
                                     .Pointer => {
-                                        @field(config, field.name) = try allocator.dupe(u8, kv.value);
+                                        const dup = try allocator.dupe(u8, kv.value);
+                                        @field(config, field.name) = dup;
+                                        try dups.append(dup);
                                     },
                                     else => |t| {
                                         std.debug.print("other value types not handled yet, got {}\n", .{t});
@@ -62,19 +69,15 @@ pub const AppConfg = struct {
         return .{
             .allocator = allocator,
             .data = config,
+            .dups = dups, // for tracking what we must free, think about better way
         };
     }
 
     pub fn deinit(self: *AppConfg) void {
-        const config_fields = std.meta.fields(ConfigData);
-
-        inline for (config_fields) |field| {
-            switch (@typeInfo(field.type)) {
-                .Pointer => self.allocator.free(@field(self.data, field.name)),
-                else => {},
-            }
+        for (self.dups.items) |d| {
+            self.allocator.free(d);
         }
-
+        self.dups.deinit();
         self.* = undefined;
     }
 };

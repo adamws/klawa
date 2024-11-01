@@ -106,21 +106,25 @@ def screen_manager():
         dummy.kill()
 
 
-def create_config(tmpdir, layout_file) -> None:
+def create_config(tmpdir, args) -> None:
     with open(f"{tmpdir}/config", "w") as f:
-        f.write(f"layout_path = {layout_file}")
+        for key, value in args.items():
+            f.write(f"{key} = {value}\n")
+    with open(f"{tmpdir}/config", "r") as r:
+        logger.debug(r.readlines())
 
 
 @pytest.fixture
 def app_isolation(tmpdir, app_path, data_dir):
     @contextmanager
-    def _isolation(layout_file: str):
+    def _isolation(args):
         new_path = shutil.copy(app_path, tmpdir)
         logger.info(f"New app path: {new_path}")
 
-        if layout_file:
-            shutil.copy(data_dir / layout_file, tmpdir)
-            create_config(tmpdir, layout_file)
+        if args:
+            if "layout_path" in args:
+                shutil.copy(data_dir / args["layout_path"], tmpdir)
+            create_config(tmpdir, args)
 
         yield new_path
 
@@ -147,22 +151,34 @@ def run_process_capture_logs(command, cwd, name="", process_holder=None) -> None
     process.wait()
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
+def __get_parameters():
+    texts = [
         "The quick brown fox jumps over the lazy dog",
         "Dość błazeństw, żrą mój pęk luźnych fig",
-    ],
-)
+    ]
+    configs = [
+        {}, # default
+        {"layout_path": "atreus.json"},
+        {"theme": "vortex_pok3r", "show_typing": "false"},
+        {"theme": "vortex_pok3r", "typing_font_color": "0xffffffff"},
+    ]
+    test_params = []
+    # not interested in all combinations
+
+    test_params.append(pytest.param(texts[0], configs[0]))
+    test_params.append(pytest.param(texts[1], configs[0]))
+    test_params.append(pytest.param(texts[0], configs[1]))
+    test_params.append(pytest.param(texts[0], configs[2]))
+    test_params.append(pytest.param(texts[0], configs[3]))
+
+    return test_params
+
+
 @pytest.mark.parametrize(
-    "layout",
-    [
-        "", # default
-        "atreus.json",
-    ],
+    "text,config", __get_parameters()
 )
-def test_record_and_render(app_isolation, text: str, layout: str) -> None:
-    with app_isolation(layout) as app:
+def test_record_and_render(app_isolation, text: str, config) -> None:
+    with app_isolation(config) as app:
         app_dir = Path(app).parent
         processes = {}
 
@@ -173,7 +189,7 @@ def test_record_and_render(app_isolation, text: str, layout: str) -> None:
         thread.start()
         time.sleep(2)
 
-        subprocess.run(["xdotool", "type", "--delay", "200", text])
+        subprocess.run(["xdotool", "type", "--delay", "400", text])
 
         process = processes.get("klawa")
         if process and process.poll() is None:
