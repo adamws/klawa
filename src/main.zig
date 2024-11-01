@@ -4,6 +4,8 @@ const rgui = @import("raygui");
 const std = @import("std");
 const fs = std.fs;
 const tracy = @import("tracy.zig");
+const known_folders = @import("known-folders");
+const KnownFolder = known_folders.KnownFolder;
 
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
@@ -13,6 +15,7 @@ const x11 = @cImport({
 const builtin = @import("builtin");
 const debug = (builtin.mode == std.builtin.OptimizeMode.Debug);
 
+const config = @import("config.zig");
 const math = @import("math.zig");
 const kle = @import("kle.zig");
 
@@ -37,6 +40,10 @@ const gl = struct {
     // these should be exported in libraylib.a:
     pub extern "c" fn glReadPixels(x: c_int, y: c_int, width: c_int, height: c_int, format: PixelFormat, @"type": PixelType, data: [*c]u8) void;
     pub const readPixels = glReadPixels;
+};
+
+pub const known_folders_config = .{
+    .xdg_on_mac = true,
 };
 
 const KEY_1U_PX = 64;
@@ -468,8 +475,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    const cwd = fs.cwd();
+
     const params = comptime clap.parseParamsComptime(
-        \\-l, --layout <str>     Keyboard layout json file.
         \\    --record <str>     Record events to file.
         \\    --replay <str>     Replay events from file.
         \\    --replay-loop      Loop replay action. When not set app will exit after replay ends.
@@ -487,23 +495,45 @@ pub fn main() !void {
         });
     }
 
+    const executable_dir = try known_folders.getPath(allocator, .executable_dir) orelse unreachable;
+    defer allocator.free(executable_dir);
+    std.debug.print("executable_dir {s}\n", .{executable_dir});
+
+    // config parse:
+    // TODO: for now look for config file only in executable dir, later should use XDG rules
+    const config_dir = executable_dir;
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/config", .{config_dir});
+    defer allocator.free(config_path);
+
+    var app_config = try config.AppConfg.init(allocator, config_path);
+    defer app_config.deinit();
+
+    const typing_font_size = app_config.data.typing_font_size;
+    const layout_path = app_config.data.layout_path;
+
     // argument validation
 
     if (res.args.replay) |replay_file| {
         // just checking if it exist
-        const f = try fs.cwd().openFile(replay_file, .{});
+        const f = try cwd.openFile(replay_file, .{});
         f.close();
     }
 
     const kle_str_default = @embedFile("resources/keyboard-layout.json");
     var kle_str: []u8 = undefined;
 
-    if (res.args.layout) |n| {
-        std.debug.print("--layout = {s}\n", .{n});
-        var layout_file = try fs.cwd().openFile(n, .{});
+    // TODO: clean up this path handling, resolving real path probably should be done by AppConfg
+    if (layout_path.len != 0) {
+        std.debug.print("layout = {s}\n", .{layout_path});
+        var dir = try cwd.openDir(config_dir, .{});
+        defer dir.close();
+        const real_layout_path = try dir.realpathAlloc(allocator, layout_path);
+        defer allocator.free(real_layout_path);
+        std.debug.print("real layout = {s}\n", .{real_layout_path});
+        var layout_file = try cwd.openFile(real_layout_path, .{});
         defer layout_file.close();
         const file_size = (try layout_file.stat()).size;
-        kle_str = try fs.cwd().readFileAlloc(allocator, n, file_size);
+        kle_str = try cwd.readFileAlloc(allocator, real_layout_path, file_size);
     } else {
         kle_str = try allocator.alloc(u8, kle_str_default.len);
         @memcpy(kle_str, kle_str_default);
@@ -560,7 +590,6 @@ pub fn main() !void {
         if (label) |l| {
             var iter = std.mem.split(u8, l, ",");
             while (iter.next()) |part| {
-                std.debug.print("{}: label: {s}\n", .{ index, part });
                 const integer = try std.fmt.parseInt(u8, part, 10);
                 keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
             }
@@ -630,7 +659,6 @@ pub fn main() !void {
 
     std.debug.print("Text contains {} codepoints\n", .{codepoints.len});
 
-    const typing_font_size = 128;
     // TODO: font should be configurable
     const font = rl.loadFontFromMemory(".ttf", font_data, typing_font_size, codepoints);
     const default_font = rl.getFontDefault();
@@ -721,7 +749,7 @@ pub fn main() !void {
                         .x = @floatFromInt(@divTrunc(width - typing_glyph_width, 2) - offset),
                         .y = @floatFromInt(@divTrunc(height - typing_font_size, 2)),
                     },
-                    typing_font_size,
+                    @floatFromInt(typing_font_size),
                     rl.Color.black,
                 );
                 offset += typing_glyph_width + 20;

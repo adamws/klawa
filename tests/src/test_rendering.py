@@ -106,6 +106,11 @@ def screen_manager():
         dummy.kill()
 
 
+def create_config(tmpdir, layout_file) -> None:
+    with open(f"{tmpdir}/config", "w") as f:
+        f.write(f"layout_path = {layout_file}")
+
+
 @pytest.fixture
 def app_isolation(tmpdir, app_path, data_dir):
     @contextmanager
@@ -115,6 +120,7 @@ def app_isolation(tmpdir, app_path, data_dir):
 
         if layout_file:
             shutil.copy(data_dir / layout_file, tmpdir)
+            create_config(tmpdir, layout_file)
 
         yield new_path
 
@@ -176,6 +182,4 @@ def test_record_and_render(app_isolation, text: str, layout: str) -> None:
         thread.join()
 
         args = [app, "--replay", "events.bin", "--render", "output.webm"]
-        if layout:
-            args.extend(["--layout", layout])
         run_process_capture_logs(args, app_dir)

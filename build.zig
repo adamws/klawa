@@ -55,6 +55,9 @@ pub fn build(b: *std.Build) void {
     const clap = b.dependency("clap", .{});
     exe.root_module.addImport("clap", clap.module("clap"));
 
+    const known_folders = b.dependency("known-folders", .{});
+    exe.root_module.addImport("known-folders", known_folders.module("known-folders"));
+
     const raylib_dep = b.dependency("raylib-zig", .{
         .target = target,
         .optimize = optimize,
