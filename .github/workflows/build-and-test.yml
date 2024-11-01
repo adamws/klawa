@@ -25,6 +25,7 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          sudo apt-get update
           sudo apt-get install libgl-dev libxi-dev \
             libx11-dev xserver-xorg-dev xorg-dev
       # kle tests not triggered from main,
@@ -56,6 +57,7 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          sudo apt-get update
           sudo apt-get install ffmpeg xdotool x11-apps xvfb
       - name: Install python dependencies
         shell: bash
