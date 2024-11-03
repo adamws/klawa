@@ -32,6 +32,9 @@ test-kle:
 test-queue:
   zig test src/spsc_queue.zig
 
+test-config:
+  zig test src/config.zig
+
 pytest:
   # TODO: enable -n auto when rendering with low framerate fixed
   cd tests && . .env/bin/activate && python -m pytest src/

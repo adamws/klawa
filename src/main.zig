@@ -63,8 +63,18 @@ pub const Theme = enum {
     }
 
     pub fn fromString(value: []const u8) ?Theme {
+        std.debug.print("Theme: '{s}'\n", .{value});
         return std.meta.stringToEnum(Theme, value);
     }
+};
+
+const ConfigData = struct {
+    typing_font_size: i32 = 120,
+    typing_font_color: u32 = 0x000000ff, // alpha=1
+    layout_path: []const u8 = "", // absolute or realative to config file
+    theme: []const u8 = "kle",
+    show_typing: bool = true,
+    key_tint_color: u32 = 0xff0000ff, // alpha=1
 };
 
 const KeyOnScreen = struct {
@@ -521,17 +531,22 @@ pub fn main() !void {
     // config parse:
     // TODO: for now look for config file only in executable dir, later should use XDG rules
     const config_dir = executable_dir;
-    const config_path = try std.fmt.allocPrint(allocator, "{s}/config", .{config_dir});
+    // use '\0' terminated alloc because this will be passed to inotify syscalls (in c)
+    const config_path = try std.fmt.allocPrintZ(allocator, "{s}/config", .{config_dir});
     defer allocator.free(config_path);
 
-    var app_config = try config.AppConfg.init(allocator, config_path);
+    var app_config = config.configManager(ConfigData, allocator);
     defer app_config.deinit();
 
-    const typing_font_size: i32 = @intCast(app_config.data.typing_font_size);
+    _ = try app_config.loadFromFile(config_path);
+
+    const typing_font_size = app_config.data.typing_font_size;
     const typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
     const layout_path = app_config.data.layout_path;
     const theme_name = app_config.data.theme;
-    const show_typing = app_config.data.show_typing;
+
+    var config_watch = try config.Watch.init(config_path);
+    defer config_watch.deinit();
 
     // argument validation
 
@@ -715,6 +730,18 @@ pub fn main() !void {
             show_gui = !show_gui;
         }
 
+        // TODO: should catch errors here
+        if (try config_watch.checkForChanges()) {
+            std.debug.print("Config file change detected\n", .{});
+            const changes = try app_config.loadFromFile(config_path);
+            var iter = changes.iterator();
+            while (iter.next()) |v| switch(v) {
+                .layout_path => std.debug.print("should reload layout path to '{s}' (not supported yet)\n", .{app_config.data.layout_path}),
+                .theme => std.debug.print("should reload theme to '{s}' (not supported yet)\n", .{app_config.data.theme}),
+                else => {},
+            };
+        }
+
         if (keys.pop()) |k| {
             if (k.symbol == null) continue;
             std.debug.print("Consumed: '{s}'\n", .{k.symbol});
@@ -751,7 +778,8 @@ pub fn main() !void {
             rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
         }
 
-        if (show_typing and std.time.timestamp() - last_char_timestamp <= typing_persistance_sec) {
+        if (app_config.data.show_typing and
+            std.time.timestamp() - last_char_timestamp <= typing_persistance_sec) {
             rl.drawRectangle(
                 0,
                 @divTrunc(height - typing_font_size, 2),
