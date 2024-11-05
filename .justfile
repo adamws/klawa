@@ -35,6 +35,9 @@ test-queue:
 test-config:
   zig test src/config.zig
 
+test:
+  zig build test
+
 pytest:
   # TODO: enable -n auto when rendering with low framerate fixed
   cd tests && . .env/bin/activate && python -m pytest src/

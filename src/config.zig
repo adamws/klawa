@@ -87,7 +87,7 @@ pub fn ConfigManager(comptime ConfigType: type) type {
                 defer file.close();
                 return self.load(file.reader().any());
             } else |err| switch (err) {
-                error.FileNotFound => return error.ConfigParseError,
+                error.FileNotFound => return error.ConfigNotFound,
                 else => return err,
             }
         }

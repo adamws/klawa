@@ -28,13 +28,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install libgl-dev libxi-dev \
             libx11-dev xserver-xorg-dev xorg-dev
-      # kle tests not triggered from main,
-      # must figure out how to properly zig test
       - run: |
           zig build
           zig build test
-          zig test src/kle.zig
-          zig test src/spsc_queue.zig
       - uses: actions/upload-artifact@v4
         if: always()
         with:

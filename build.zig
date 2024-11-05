@@ -89,7 +89,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/tests.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -99,6 +99,10 @@ pub fn build(b: *std.Build) void {
     for (system_libs) |lib| {
         exe_unit_tests.linkSystemLibrary(lib);
     }
+
+    exe_unit_tests.linkLibrary(raylib_artifact);
+    exe_unit_tests.root_module.addImport("raylib", raylib);
+    exe_unit_tests.root_module.addImport("raygui", raygui);
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

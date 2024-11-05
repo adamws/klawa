@@ -46,8 +46,6 @@ pub const known_folders_config = .{
     .xdg_on_mac = true,
 };
 
-const KEY_1U_PX = 64;
-
 pub const Theme = enum {
     kle,
     vortex_pok3r,
@@ -63,8 +61,23 @@ pub const Theme = enum {
     }
 
     pub fn fromString(value: []const u8) ?Theme {
-        std.debug.print("Theme: '{s}'\n", .{value});
         return std.meta.stringToEnum(Theme, value);
+    }
+};
+
+pub const Layout = enum {
+    @"60_iso",
+
+    const layout_60_iso_data = @embedFile("resources/keyboard-layout.json");
+
+    pub fn getData(self: Layout) []const u8 {
+        return switch (self) {
+            .@"60_iso" => layout_60_iso_data,
+        };
+    }
+
+    pub fn fromString(value: []const u8) ?Layout {
+        return std.meta.stringToEnum(Layout, value);
     }
 };
 
@@ -204,13 +217,11 @@ const X11InputContext = struct {
 var run_x11_thread: bool = true;
 var x11_thread_active: bool = false;
 
-var keyboard: kle.Keyboard = undefined;
-var key_states: []KeyOnScreen = undefined;
-var keycode_keyboard_lookup = [_]i32{-1} ** 256;
-
 // queue for passing key data from producer (x11 listening thread) to consumer (app loop)
 var keys = SpscQueue(32, KeyData).init();
 var last_char_timestamp: i64 = 0;
+
+var app_state: AppState = undefined;
 
 // https://github.com/bits/UTF-8-Unicode-Test-Documents/blob/master/UTF-8_sequence_unseparated/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt
 const text = @embedFile("resources/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt");
@@ -290,14 +301,6 @@ const all_text = text ++ symbols;
 // TODO: font discovery with fallbacks when glyph not found
 // TODO: support for non-monospaced fonts
 const font_data = @embedFile("resources/DejaVuSansMono.ttf");
-
-fn updateKeyStates(keycode: usize, pressed: bool) void {
-    const lookup: i32 = keycode_keyboard_lookup[keycode];
-    if (lookup >= 0) {
-        const index: usize = @intCast(lookup);
-        key_states[index].pressed = pressed;
-    }
-}
 
 fn xiSetMask(ptr: []u8, event: usize) void {
     const offset: u3 = @truncate(event);
@@ -384,7 +387,7 @@ fn x11Listener(app_window: x11.Window, record_file: ?[]const u8) !void {
                         _ = try file.writeAll(device_event_data[0..@sizeOf(x11.XIDeviceEvent)]);
                     }
 
-                    updateKeyStates(keycode, cookie.evtype == x11.XI_KeyPress);
+                    app_state.updateKeyStates(keycode, cookie.evtype == x11.XI_KeyPress);
 
                     if (cookie.evtype == x11.XI_KeyPress) {
                         last_char_timestamp = std.time.timestamp();
@@ -457,7 +460,7 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
 
             // do stuff with event-from-file
 
-            updateKeyStates(
+            app_state.updateKeyStates(
                 @intCast(device_event.detail),
                 device_event.evtype == x11.XI_KeyPress,
             );
@@ -483,8 +486,8 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
                 std.debug.print("End of file\n", .{});
                 if (loop) {
                     try file.seekTo(0);
-                    for (key_states, 0..) |_, i| {
-                        var s = &key_states[i];
+                    for (app_state.key_states, 0..) |_, i| {
+                        var s = &app_state.key_states[i];
                         s.pressed = false;
                     }
                 } else {
@@ -493,6 +496,200 @@ fn x11Producer(app_window: x11.Window, replay_file: []const u8, loop: bool) !voi
             },
             else => return err,
         }
+    }
+}
+
+pub const AppState = struct {
+    allocator: std.mem.Allocator,
+    parsed: std.json.Parsed(kle.Keyboard),
+    keyboard: kle.Keyboard,
+    key_states: []KeyOnScreen,
+    keycode_keyboard_lookup: [256]i32,
+    window_width: c_int,
+    window_height: c_int,
+
+    const KEY_1U_PX = 64;
+
+    pub fn init(allocator: std.mem.Allocator, parsed: std.json.Parsed(kle.Keyboard)) !AppState {
+        var self: AppState = .{
+            .allocator = allocator,
+            .parsed = parsed,
+            .keyboard = parsed.value,
+            .key_states = try allocator.alloc(KeyOnScreen, parsed.value.keys.len),
+            .keycode_keyboard_lookup = .{-1} ** 256,
+            .window_width = -1,
+            .window_height = -1,
+        };
+        initKeys(&self);
+        try calculateKeyLookup(&self);
+        calcualteWindoWize(&self);
+        return self;
+    }
+
+    fn initKeys(self: *AppState) void {
+        for (self.keyboard.keys, 0..) |k, index| {
+            var s = &self.key_states[index];
+
+            const angle_rad = std.math.rad_per_deg * k.rotation_angle;
+            const point = math.Vec2{ .x = k.x, .y = k.y };
+            const rot_origin = math.Vec2{ .x = k.rotation_x, .y = k.rotation_y };
+            const result = math.rotate_around_center(point, rot_origin, angle_rad);
+
+            const width: f32 = @floatCast(KEY_1U_PX * @max(k.width, k.width2));
+            const height: f32 = @floatCast(KEY_1U_PX * @max(k.height, k.height2));
+
+            s.src = rl.Rectangle{
+                .x = 0,
+                .y = @floatCast(KEY_1U_PX * (k.width * 4 - 4)),
+                .width = width,
+                .height = height,
+            };
+            s.dst = rl.Rectangle{
+                .x = @floatCast(KEY_1U_PX * result.x),
+                .y = @floatCast(KEY_1U_PX * result.y),
+                .width = width,
+                .height = height,
+            };
+            s.angle = @floatCast(k.rotation_angle);
+
+            // special case: iso enter
+            // TODO: calculate, not hardcode
+            if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
+                s.src.x = 0;
+                s.src.y = 1728;
+                s.dst.x -= 0.25 * KEY_1U_PX;
+            } else if (k.width == 1.0 and k.height == 2.0) {
+                s.src.x = 0;
+                s.src.y = 1728 - 64;
+            }
+
+            s.pressed = false;
+        }
+    }
+
+    fn calculateKeyLookup(self: *AppState) !void {
+        for (self.keyboard.keys, 0..) |key, index| {
+            const label = key.labels[0];
+            if (label) |l| {
+                var iter = std.mem.split(u8, l, ",");
+                while (iter.next()) |part| {
+                    const integer = try std.fmt.parseInt(u8, part, 10);
+                    self.keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
+                }
+            }
+        }
+    }
+
+    fn calcualteWindoWize(self: *AppState) void {
+        const bbox = self.calculateBoundingBox();
+        self.window_width = @intFromFloat(bbox.w * KEY_1U_PX);
+        self.window_height = @intFromFloat(bbox.h * KEY_1U_PX);
+        std.debug.print("Window size: {}x{}\n", .{ self.window_width, self.window_height });
+    }
+
+    fn calculateBoundingBox(self: AppState) struct { x: f64, y: f64, w: f64, h: f64 } {
+        var max_x: f64 = 0;
+        var max_y: f64 = 0;
+        for (self.keyboard.keys) |k| {
+            const angle = k.rotation_angle;
+            if (angle != 0) {
+                const angle_rad = std.math.rad_per_deg * angle;
+                const rot_origin = kle.Point{ .x = k.rotation_x, .y = k.rotation_y };
+
+                // when rotated, check each corner
+                const x1 = k.x;
+                const x2 = k.x + k.width;
+                const y1 = k.y;
+                const y2 = k.y + k.height;
+                const corners = [4]kle.Point {
+                    .{ .x = x1, .y = y1 },
+                    .{ .x = x2, .y = y1 },
+                    .{ .x = x1, .y = y2 },
+                    .{ .x = x2, .y = y2 },
+                };
+
+                for (corners) |p| {
+                    const rotated = math.rotate_around_center(p, rot_origin, angle_rad);
+
+                    if (rotated.x >= max_x) max_x = rotated.x;
+                    if (rotated.y >= max_y) max_y = rotated.y;
+                }
+            } else {
+                //when not rotated, it is safe to check only bottom right corner:
+                const x = k.x + k.width;
+                const y = k.y + k.height;
+                if (x >= max_x) max_x = x;
+                if (y >= max_y) max_y = y;
+            }
+        }
+        // note: always start at (0, 0).
+        // we do not support layout shifting
+        return .{ .x = 0, .y = 0, .w = max_x, .h = max_y };
+    }
+
+    pub fn updateKeyStates(self: *AppState, keycode: usize, pressed: bool) void {
+        const lookup: i32 = self.keycode_keyboard_lookup[keycode];
+        if (lookup >= 0) {
+            const index: usize = @intCast(lookup);
+            self.key_states[index].pressed = pressed;
+        }
+    }
+
+    pub fn deinit(self: *AppState) void {
+        self.parsed.deinit();
+        self.allocator.free(self.key_states);
+        self.* = undefined;
+    }
+};
+
+fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: []const u8, layout: Layout) !AppState {
+    const kle_str: []const u8 = blk: {
+        if (layout_path.len != 0) {
+            std.debug.print("layout = {s}\n", .{layout_path});
+            var dir = try fs.cwd().openDir(config_path, .{});
+            defer dir.close();
+            var layout_file = try dir.openFile(layout_path, .{});
+            break :blk try layout_file.readToEndAlloc(allocator, 4096);
+        } else {
+            break :blk try allocator.dupe(u8, layout.getData());
+        }
+    };
+    defer allocator.free(kle_str);
+
+    const keyboard = try kle.parseFromSlice(allocator, kle_str);
+    return AppState.init(allocator, keyboard);
+}
+
+test "bounding box" {
+    const cases = [_]struct {
+        layout: []const u8,
+        expected: struct { w: c_int, h: c_int },
+    }{
+        .{
+            .layout = @embedFile("resources/keyboard-layout.json"),
+            .expected = .{ .w = 960, .h = 320 },
+        },
+
+        //.{
+        //    .layout = @embedFile("test_data/ansi-104.json"),
+        //    .expected = .{ .w = 1440, .h = 416 },
+        //},
+        //.{
+        //    .layout = @embedFile("test_data/atreus.json"),
+        //    .expected = .{ .w = 812, .h = 345 },
+        //},
+    };
+
+    const allocator = std.testing.allocator;
+
+    for (cases) |case| {
+        const parsed = try kle.parseFromSlice(allocator, case.layout);
+
+        var s = try AppState.init(allocator, parsed);
+        defer s.deinit();
+
+        try std.testing.expect(s.window_width == case.expected.w);
+        try std.testing.expect(s.window_height == case.expected.h);
     }
 }
 
@@ -524,6 +721,16 @@ pub fn main() !void {
         });
     }
 
+    // argument validation
+
+    if (res.args.replay) |replay_file| {
+        // just checking if it exist
+        const f = try cwd.openFile(replay_file, .{});
+        f.close();
+    }
+
+    // config handling
+
     const executable_dir = try known_folders.getPath(allocator, .executable_dir) orelse unreachable;
     defer allocator.free(executable_dir);
     std.debug.print("executable_dir {s}\n", .{executable_dir});
@@ -538,7 +745,10 @@ pub fn main() !void {
     var app_config = config.configManager(ConfigData, allocator);
     defer app_config.deinit();
 
-    _ = try app_config.loadFromFile(config_path);
+    _ = app_config.loadFromFile(config_path) catch |err| switch (err) {
+        error.ConfigNotFound => std.debug.print("Default builtin config\n", .{}),
+        else => return err,
+    };
 
     const typing_font_size = app_config.data.typing_font_size;
     const typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
@@ -548,122 +758,33 @@ pub fn main() !void {
     var config_watch = try config.Watch.init(config_path);
     defer config_watch.deinit();
 
-    // argument validation
+    app_state = try getState(allocator, config_dir, layout_path, Layout.@"60_iso");
+    defer app_state.deinit();
 
-    if (res.args.replay) |replay_file| {
-        // just checking if it exist
-        const f = try cwd.openFile(replay_file, .{});
-        f.close();
-    }
-
-    const kle_str_default = @embedFile("resources/keyboard-layout.json");
-    var kle_str: []u8 = undefined;
-
-    // TODO: clean up this path handling, resolving real path probably should be done by AppConfg
-    if (layout_path.len != 0) {
-        std.debug.print("layout = {s}\n", .{layout_path});
-        var dir = try cwd.openDir(config_dir, .{});
-        defer dir.close();
-        const real_layout_path = try dir.realpathAlloc(allocator, layout_path);
-        defer allocator.free(real_layout_path);
-        std.debug.print("real layout = {s}\n", .{real_layout_path});
-        var layout_file = try cwd.openFile(real_layout_path, .{});
-        defer layout_file.close();
-        const file_size = (try layout_file.stat()).size;
-        kle_str = try cwd.readFileAlloc(allocator, real_layout_path, file_size);
-    } else {
-        kle_str = try allocator.alloc(u8, kle_str_default.len);
-        @memcpy(kle_str, kle_str_default);
-    }
-
-    const keyboard_parsed = try kle.parseFromSlice(allocator, kle_str);
-    defer {
-        allocator.free(kle_str);
-        keyboard_parsed.deinit();
-    }
-
-    keyboard = keyboard_parsed.value;
-    key_states = try allocator.alloc(KeyOnScreen, keyboard.keys.len);
-    defer allocator.free(key_states);
-
-    for (keyboard.keys, 0..) |k, index| {
-        var s = &key_states[index];
-
-        const angle_rad = std.math.rad_per_deg * k.rotation_angle;
-        const point = math.Vec2{ .x = k.x, .y = k.y };
-        const rot_origin = math.Vec2{ .x = k.rotation_x, .y = k.rotation_y };
-        const result = math.rotate_around_center(point, rot_origin, angle_rad);
-
-        const width: f32 = @floatCast(KEY_1U_PX * @max(k.width, k.width2));
-        const height: f32 = @floatCast(KEY_1U_PX * @max(k.height, k.height2));
-
-        s.src = rl.Rectangle{
-            .x = 0,
-            .y = @floatCast(KEY_1U_PX * (k.width * 4 - 4)),
-            .width = width,
-            .height = height,
-        };
-        s.dst = rl.Rectangle{
-            .x = @floatCast(KEY_1U_PX * result.x),
-            .y = @floatCast(KEY_1U_PX * result.y),
-            .width = width,
-            .height = height,
-        };
-        s.angle = @floatCast(k.rotation_angle);
-
-        // special case: iso enter
-        // TODO: calculate, not hardcode
-        if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
-            s.src.x = 0;
-            s.src.y = 1728;
-            s.dst.x -= 0.25 * KEY_1U_PX;
-        } else if (k.width == 1.0 and k.height == 2.0) {
-            s.src.x = 0;
-            s.src.y = 1728 - 64;
-        }
-
-        s.pressed = false;
-    }
-
-    // calculate key lookup
-    for (keyboard.keys, 0..) |key, index| {
-        const label = key.labels[0];
-        if (label) |l| {
-            var iter = std.mem.split(u8, l, ",");
-            while (iter.next()) |part| {
-                const integer = try std.fmt.parseInt(u8, part, 10);
-                keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
-            }
-        }
-    }
-
-    const bbox = try keyboard.calculateBoundingBox();
-    const width: c_int = @intFromFloat(bbox.w * KEY_1U_PX);
-    const height: c_int = @intFromFloat(bbox.h * KEY_1U_PX);
-    std.debug.print("Canvas: {}x{}\n", .{ width, height });
-
-    var renderer: ?Ffmpeg = null;
-    var pixels: ?[]u8 = null;
-    if (res.args.render) |dst| {
-        // TODO: check if ffmpeg installed
-        renderer = try Ffmpeg.spawn(@intCast(width), @intCast(height), dst, allocator);
-        pixels = try allocator.alloc(u8, @as(usize, @intCast(width * height)) * 4);
-    }
-    defer if (pixels) |p| allocator.free(p);
-
+    // window creation
 
     rl.setConfigFlags(.{ .msaa_4x_hint = true, .vsync_hint = true, .window_highdpi = true });
-    rl.initWindow(width, height, "klawa");
+    rl.initWindow(app_state.window_width, app_state.window_height, "klawa");
     defer rl.closeWindow();
 
-    const monitor_refreshrate = rl.getMonitorRefreshRate(rl.getCurrentMonitor());
-    std.debug.print("Current monitor refresh rate: {}\n", .{monitor_refreshrate});
+    // TODO: make this optional/configurable:
+    rl.setWindowState(.{ .window_undecorated = true });
+    rl.setExitKey(rl.KeyboardKey.key_null);
 
     const app_window = glfw.getX11Window(@ptrCast(rl.getWindowHandle()));
     std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
 
     // TODO: is this even needed?
     rl.setTargetFPS(60);
+
+    var renderer: ?Ffmpeg = null;
+    var pixels: ?[]u8 = null;
+    if (res.args.render) |dst| {
+        // TODO: check if ffmpeg installed
+        renderer = try Ffmpeg.spawn(@intCast(app_state.window_width), @intCast(app_state.window_height), dst, allocator);
+        pixels = try allocator.alloc(u8, @as(usize, @intCast(app_state.window_width * app_state.window_height)) * 4);
+    }
+    defer if (pixels) |p| allocator.free(p);
 
     var thread: ?std.Thread = null;
     if (res.args.replay) |replay_file| {
@@ -677,11 +798,6 @@ pub fn main() !void {
     defer if (thread) |t| {
         t.join();
     };
-
-    // TODO: make this optional/configurable:
-    rl.setWindowState(.{ .window_undecorated = true });
-
-    rl.setExitKey(rl.KeyboardKey.key_null);
 
     const theme = Theme.fromString(theme_name) orelse unreachable;
     const keycaps = theme.getData();
@@ -718,8 +834,6 @@ pub fn main() !void {
 
     var codepoints_buffer = CodepointBuffer{};
 
-    var frame_cnt: usize = 0;
-
     while (!exit_window) {
         if (rl.windowShouldClose()) {
             exit_window = true;
@@ -730,13 +844,22 @@ pub fn main() !void {
             show_gui = !show_gui;
         }
 
-        // TODO: should catch errors here
+        // TODO: handle errors
         if (try config_watch.checkForChanges()) {
             std.debug.print("Config file change detected\n", .{});
             const changes = try app_config.loadFromFile(config_path);
             var iter = changes.iterator();
             while (iter.next()) |v| switch(v) {
-                .layout_path => std.debug.print("should reload layout path to '{s}' (not supported yet)\n", .{app_config.data.layout_path}),
+                .layout_path => {
+                    std.debug.print("Reload layout from '{s}'\n", .{app_config.data.layout_path});
+                    if (getState(allocator, config_dir, app_config.data.layout_path, Layout.@"60_iso")) |new_state| {
+                        app_state.deinit();
+                        app_state = new_state;
+                        rl.setWindowSize(app_state.window_width, app_state.window_height);
+                    } else |err| switch (err) {
+                        else => unreachable,
+                    }
+                },
                 .theme => std.debug.print("should reload theme to '{s}' (not supported yet)\n", .{app_config.data.theme}),
                 else => {},
             };
@@ -770,7 +893,7 @@ pub fn main() !void {
 
         const rot = rl.Vector2{ .x = 0, .y = 0 };
 
-        for (key_states) |k| {
+        for (app_state.key_states) |k| {
             var dst = k.dst;
             if (k.pressed) dst.y += 5;
             // TODO: tint color should be configurable
@@ -782,8 +905,8 @@ pub fn main() !void {
             std.time.timestamp() - last_char_timestamp <= typing_persistance_sec) {
             rl.drawRectangle(
                 0,
-                @divTrunc(height - typing_font_size, 2),
-                width,
+                @divTrunc(app_state.window_height - typing_font_size, 2),
+                app_state.window_width,
                 typing_font_size,
                 rl.Color{ .r = 0, .g = 0, .b = 0, .a = 128 },
             );
@@ -795,8 +918,8 @@ pub fn main() !void {
                     font,
                     cp,
                     .{
-                        .x = @floatFromInt(@divTrunc(width - typing_glyph_width, 2) - offset),
-                        .y = @floatFromInt(@divTrunc(height - typing_font_size, 2)),
+                        .x = @floatFromInt(@divTrunc(app_state.window_width - typing_glyph_width, 2) - offset),
+                        .y = @floatFromInt(@divTrunc(app_state.window_height - typing_font_size, 2)),
                     },
                     @floatFromInt(typing_font_size),
                     typing_font_color,
@@ -809,14 +932,14 @@ pub fn main() !void {
             rl.drawRectangle(
                 0,
                 0,
-                width,
-                height,
+                app_state.window_width,
+                app_state.window_height,
                 rl.Color{ .r = 255, .g = 255, .b = 255, .a = 196 },
             );
 
             if (1 == rgui.guiButton(
                 .{
-                    .x = @floatFromInt(width - 48 - exit_text_width),
+                    .x = @floatFromInt(app_state.window_width - 48 - exit_text_width),
                     .y = 16,
                     .width = @floatFromInt(32 + exit_text_width),
                     .height = 32,
@@ -856,8 +979,6 @@ pub fn main() !void {
                 exit_window = true;
             }
         }
-
-        frame_cnt += 1;
     }
 
     // NOTE: not able to stop x11Listener yet, applicable only for x11Producer

@@ -2,7 +2,7 @@ const std = @import("std");
 const math = @import("math.zig");
 const json = std.json;
 
-const Point = math.Vec2;
+pub const Point = math.Vec2;
 
 const DEFAULT_KEY_COLOR = "#cccccc";
 const DEFAULT_TEXT_COLOR = "#000000";
@@ -104,46 +104,6 @@ pub const KeyboardMetadata = struct {
 pub const Keyboard = struct {
     meta: KeyboardMetadata = .{},
     keys: []Key,
-
-    pub fn calculateBoundingBox(self: *const Keyboard) !struct { x: f64, y: f64, w: f64, h: f64 } {
-        var max_x: f64 = 0;
-        var max_y: f64 = 0;
-        for (self.keys) |k| {
-            const angle = k.rotation_angle;
-            if (angle != 0) {
-                const angle_rad = std.math.rad_per_deg * angle;
-                const rot_origin = Point{ .x = k.rotation_x, .y = k.rotation_y };
-
-                // when rotated, check each corner
-                const x1 = k.x;
-                const x2 = k.x + k.width;
-                const y1 = k.y;
-                const y2 = k.y + k.height;
-                const corners = [4]Point {
-                    .{ .x = x1, .y = y1 },
-                    .{ .x = x2, .y = y1 },
-                    .{ .x = x1, .y = y2 },
-                    .{ .x = x2, .y = y2 },
-                };
-
-                for (corners) |p| {
-                    const rotated = math.rotate_around_center(p, rot_origin, angle_rad);
-
-                    if (rotated.x >= max_x) max_x = rotated.x;
-                    if (rotated.y >= max_y) max_y = rotated.y;
-                }
-            } else {
-                //when not rotated, it is safe to check only bottom right corner:
-                const x = k.x + k.width;
-                const y = k.y + k.height;
-                if (x >= max_x) max_x = x;
-                if (y >= max_y) max_y = y;
-            }
-        }
-        // note: always start at (0, 0).
-        // we do not support layout shifting
-        return .{ .x = 0, .y = 0, .w = max_x, .h = max_y };
-    }
 };
 
 fn asf64(v: json.Value) !f64 {
@@ -368,28 +328,6 @@ fn makeTestCase(comptime name: []const u8) type {
 
             const reference = @embedFile(std.fmt.comptimePrint("test_data/{s}-internal.json", .{name}));
             try std.testing.expect(std.mem.eql(u8, out.items, reference));
-        }
-
-        test "calculate bounding box" {
-            const allocator = std.testing.allocator;
-
-            const kle_str = @embedFile(std.fmt.comptimePrint("test_data/{s}.json", .{name}));
-            const kle = try parseFromSlice(allocator, kle_str);
-            defer kle.deinit();
-
-            const bbox = try kle.value.calculateBoundingBox();
-            const width: i64 = @intFromFloat(bbox.w * 64);
-            const height: i64 = @intFromFloat(bbox.h * 64);
-
-            if (std.mem.eql(u8, name, "ansi-104")) {
-                try expect(width == 1440);
-                try expect(height == 416);
-            } else if (std.mem.eql(u8, name, "atreus")) {
-                try expect(width == 812);
-                try expect(height == 345);
-            } else {
-                unreachable;
-            }
         }
     };
 }
