@@ -14,7 +14,7 @@ const Constants = struct {
     const keycap_1u_size: f32 = 64;
     const step_size: f32 = 16;
     const atlas_width: f32 = 7 * keycap_1u_size;
-    const atlas_height: f32 = 4 * atlas_width + 64;
+    const atlas_height: f32 = 4 * atlas_width + 64 + 96;
 };
 
 const KeySize = struct {
@@ -223,10 +223,13 @@ pub fn main() !void {
         }
     }
 
-    // vertical keys (only 2u for now)
+    // vertical keys (1.5u and 2u for now)
     {
-        const size = KeySize{ .width = Constants.keycap_1u_size, .height = 2 * Constants.keycap_1u_size };
-        try generateStandardKey(&result_image, keycap_image, size, &current_y_pos, regions);
+        const heights = [_]f32{ 1.5, 2 };
+        for (heights) |h| {
+            const size = KeySize{ .width = Constants.keycap_1u_size, .height = h * Constants.keycap_1u_size };
+            try generateStandardKey(&result_image, keycap_image, size, &current_y_pos, regions);
+        }
     }
 
     // iso enter

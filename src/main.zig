@@ -261,11 +261,14 @@ pub const AppState = struct {
             // TODO: calculate, not hardcode
             if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
                 s.src.x = 0;
-                s.src.y = 1728;
+                s.src.y = 1824;
                 s.dst.x -= 0.25 * KEY_1U_PX;
             } else if (k.width == 1.0 and k.height == 2.0) {
                 s.src.x = 0;
-                s.src.y = 1728 - 64;
+                s.src.y = 1824 - 128;
+            } else if (k.width == 1.0 and k.height == 1.5) {
+                s.src.x = 0;
+                s.src.y = 1824 - 128 - 64 - 32;
             }
 
             s.pressed = false;
