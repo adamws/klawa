@@ -398,6 +398,16 @@ test "bounding box" {
     }
 }
 
+fn loadTexture(theme: Theme) rl.Texture {
+    const keycaps = theme.getData();
+    const keycaps_image = rl.loadImageFromMemory(".png", keycaps);
+    const keycap_texture = rl.loadTextureFromImage(keycaps_image);
+    rl.setTextureFilter(keycap_texture, rl.TextureFilter.texture_filter_bilinear);
+    // texture created, image no longer needed
+    rl.unloadImage(keycaps_image);
+    return keycap_texture;
+}
+
 pub fn main() !void {
     const trace_ = tracy.trace(@src());
     defer trace_.end();
@@ -504,16 +514,11 @@ pub fn main() !void {
         t.join();
     };
 
-    const theme = Theme.fromString(theme_name) orelse unreachable;
-    const keycaps = theme.getData();
-    const keycaps_image = rl.loadImageFromMemory(".png", keycaps);
-    const keycap_texture = rl.loadTextureFromImage(keycaps_image);
+    var keycap_texture = blk: {
+        const theme = Theme.fromString(theme_name) orelse unreachable;
+        break :blk loadTexture(theme);
+    };
     defer rl.unloadTexture(keycap_texture);
-
-    rl.setTextureFilter(keycap_texture, rl.TextureFilter.texture_filter_bilinear);
-
-    // texture created, image no longer needed
-    rl.unloadImage(keycaps_image);
 
     // TODO: implement font discovery
     // TODO: if not found fallback to default
@@ -565,7 +570,17 @@ pub fn main() !void {
                         else => unreachable,
                     }
                 },
-                .theme => std.debug.print("should reload theme to '{s}' (not supported yet)\n", .{app_config.data.theme}),
+                .theme => {
+                    std.debug.print("Reload theme to '{s}'\n", .{app_config.data.theme});
+                    if (Theme.fromString(app_config.data.theme)) |new_theme| {
+                        keycap_texture = blk: {
+                            rl.unloadTexture(keycap_texture);
+                            break :blk loadTexture(new_theme);
+                        };
+                    } else {
+                        std.debug.print("Got unrecognized theme: '{s}', reload aborted\n", .{app_config.data.theme});
+                    }
+                },
                 else => {},
             };
         }
