@@ -131,7 +131,9 @@ fn stitchHorizontally(
     const middle_width = current_width - @as(c_int, @intFromFloat(regions.left.rect.width + regions.right.rect.width));
     var x: c_int = 0;
     while (x < middle_width) : (x += 1) {
-        rl.imageDraw(result_image, source_image, regions.middle1px_vertical.rect, dst.rect, rl.Color.white);
+        var middle_dst = dst.rect;
+        middle_dst.width = 1;
+        rl.imageDraw(result_image, source_image, regions.middle1px_vertical.rect, middle_dst, rl.Color.white);
         dst.rect.x += 1;
     }
 
@@ -156,7 +158,9 @@ fn stitchVertically(
     const middle_height = current_height - @as(c_int, @intFromFloat(regions.top.rect.height + regions.bottom.rect.height));
     var y: c_int = 0;
     while (y < middle_height) : (y += 1) {
-        rl.imageDraw(result_image, source_image, regions.middle1px_horizontal.rect, dst.rect, rl.Color.white);
+        var middle_dst = dst.rect;
+        middle_dst.height = 1;
+        rl.imageDraw(result_image, source_image, regions.middle1px_horizontal.rect, middle_dst, rl.Color.white);
         dst.rect.y += 1;
     }
 
