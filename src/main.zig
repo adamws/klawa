@@ -74,6 +74,7 @@ pub const Layout = enum {
 };
 
 const ConfigData = struct {
+    window_undecorated: bool = true,
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
     layout_path: []const u8 = "", // absolute or realative to config file
@@ -488,8 +489,7 @@ pub fn main() !void {
     rl.initWindow(app_state.window_width, app_state.window_height, "klawa");
     defer rl.closeWindow();
 
-    // TODO: make this optional/configurable:
-    rl.setWindowState(.{ .window_undecorated = true });
+    rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
     rl.setExitKey(rl.KeyboardKey.key_null);
 
     const app_window = x11.getX11Window(@ptrCast(rl.getWindowHandle()));
@@ -566,6 +566,9 @@ pub fn main() !void {
             const changes = try app_config.loadFromFile(config_path);
             var iter = changes.iterator();
             while (iter.next()) |v| switch(v) {
+                .window_undecorated => {
+                    rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
+                },
                 .layout_path => {
                     std.debug.print("Reload layout from '{s}'\n", .{app_config.data.layout_path});
                     if (getState(allocator, config_dir, app_config.data.layout_path, Layout.@"60_iso")) |new_state| {
