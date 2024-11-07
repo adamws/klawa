@@ -78,7 +78,7 @@ const ConfigData = struct {
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
     layout_path: []const u8 = "", // absolute or realative to config file
-    theme: []const u8 = "kle",
+    theme: []const u8 = "default",
     show_typing: bool = true,
     key_tint_color: u32 = 0xff0000ff, // alpha=1
 };
