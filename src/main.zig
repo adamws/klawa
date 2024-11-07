@@ -576,6 +576,7 @@ pub fn main() !void {
                         app_state = new_state;
                         rl.setWindowSize(app_state.window_width, app_state.window_height);
                     } else |err| switch (err) {
+                        error.FileNotFound => std.debug.print("Layout file not found, reload aborted\n", .{}),
                         else => unreachable,
                     }
                 },
