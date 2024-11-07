@@ -36,14 +36,17 @@ pub const known_folders_config = .{
 };
 
 pub const Theme = enum {
+    default,
     kle,
     vortex_pok3r,
 
+    const keycaps_default_data = @embedFile("resources/keycaps_default_atlas.png");
     const keycaps_kle_data = @embedFile("resources/keycaps_kle_with_gaps_atlas.png");
     const keycaps_vortex_pok3r_data = @embedFile("resources/keycaps_vortex_pok3r_atlas.png");
 
     pub fn getData(self: Theme) []const u8 {
         return switch (self) {
+            .default => keycaps_default_data,
             .kle => keycaps_kle_data,
             .vortex_pok3r => keycaps_vortex_pok3r_data,
         };
