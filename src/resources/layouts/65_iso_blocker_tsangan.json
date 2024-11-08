@@ -1,0 +1,129 @@
+[
+  [
+    "ESC\n\n\n\n\n\nGRV",
+    "1\n\n\n\n\n\nF1",
+    "2\n\n\n\n\n\nF2",
+    "3\n\n\n\n\n\nF3",
+    "4\n\n\n\n\n\nF4",
+    "5\n\n\n\n\n\nF5",
+    "6\n\n\n\n\n\nF6",
+    "7\n\n\n\n\n\nF7",
+    "8\n\n\n\n\n\nF8",
+    "9\n\n\n\n\n\nF9",
+    "0\n\n\n\n\n\nF10",
+    "MINS\n\n\n\n\n\nF11",
+    "EQL\n\n\n\n\n\nF12",
+    {
+      "w": 2,
+      "w2": 1
+    },
+    "BSPC\n\n\n\n\n\nDEL",
+    "HOME"
+  ],
+  [
+    {
+      "w": 1.5,
+      "w2": 1
+    },
+    "TAB",
+    "Q",
+    "W",
+    "E",
+    "R",
+    "T",
+    "Y\n\n\n\n\n\nINS",
+    "U",
+    "I",
+    "O",
+    "P",
+    "LBRC\n\n\n\n\n\nPSCR",
+    "RBRC\n\n\n\n\n\nSCRL",
+    {
+      "x": 0.25,
+      "w": 1.25,
+      "h": 2,
+      "w2": 1.5,
+      "h2": 1,
+      "x2": -0.25
+    },
+    "ENT",
+    "PGUP"
+  ],
+  [
+    {
+      "w": 1.75,
+      "w2": 1
+    },
+    "CAPS",
+    "A",
+    "S",
+    "D",
+    "F",
+    "G",
+    "H",
+    "J",
+    "K",
+    "L",
+    "SCLN",
+    "QUOT",
+    "NUHS\n\n\n\n\n\nPAUS",
+    {
+      "x": 1.25
+    },
+    "PGDN"
+  ],
+  [
+    {
+      "w": 1.25,
+      "w2": 1
+    },
+    "LSFT",
+    "NUBS",
+    "Z",
+    "X",
+    "C",
+    "V",
+    "B",
+    "N",
+    "M\n\n\n\n\n\nMUTE",
+    "COMM\n\n\n\n\n\nVOLD",
+    "DOT\n\n\n\n\n\nVOLU",
+    "SLSH",
+    {
+      "w": 1.75,
+      "w2": 1
+    },
+    "RSFT",
+    "UP",
+    "END"
+  ],
+  [
+    {
+      "w": 1.5,
+      "w2": 1
+    },
+    "LCTL",
+    "LGUI",
+    {
+      "w": 1.5,
+      "w2": 1
+    },
+    "LALT",
+    {
+      "w": 7,
+      "w2": 1
+    },
+    "SPC",
+    {
+      "w": 1.5,
+      "w2": 1
+    },
+    "MO_1",
+    {
+      "x": 0.5
+    },
+    "LEFT",
+    "DOWN",
+    "RGHT"
+  ]
+]

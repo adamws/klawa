@@ -15,7 +15,10 @@ const math = @import("math.zig");
 const tracy = @import("tracy.zig");
 const x11 = @import("x11.zig");
 
+const labels_lookup = @import("layout_labels.zig").labels_lookup;
+
 const Ffmpeg = @import("ffmpeg.zig").Ffmpeg;
+const Layout = @import("layout.zig").Layout;
 const SpscQueue = @import("spsc_queue.zig").SpscQueue;
 
 const gl = struct {
@@ -57,26 +60,11 @@ pub const Theme = enum {
     }
 };
 
-pub const Layout = enum {
-    @"60_iso",
-
-    const layout_60_iso_data = @embedFile("resources/keyboard-layout.json");
-
-    pub fn getData(self: Layout) []const u8 {
-        return switch (self) {
-            .@"60_iso" => layout_60_iso_data,
-        };
-    }
-
-    pub fn fromString(value: []const u8) ?Layout {
-        return std.meta.stringToEnum(Layout, value);
-    }
-};
-
 const ConfigData = struct {
     window_undecorated: bool = true,
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
+    layout_preset: []const u8 = "tkl_ansi",
     layout_path: []const u8 = "", // absolute or realative to config file
     theme: []const u8 = "default",
     show_typing: bool = true,
@@ -280,13 +268,16 @@ pub const AppState = struct {
     }
 
     fn calculateKeyLookup(self: *AppState) !void {
+        var universal_key_label: [128]u8 = undefined;
         for (self.keyboard.keys, 0..) |key, index| {
-            const label = key.labels[0];
-            if (label) |l| {
-                var iter = std.mem.split(u8, l, ",");
-                while (iter.next()) |part| {
-                    const integer = try std.fmt.parseInt(u8, part, 10);
-                    self.keycode_keyboard_lookup[@as(usize, integer)] = @intCast(index);
+            for (key.labels) |maybe_label| {
+                if (maybe_label) |label| {
+                    var iter = std.mem.split(u8, label, ",");
+                    while (iter.next()) |part| {
+                        const key_label = try std.fmt.bufPrint(&universal_key_label, "KC_{s}", .{part});
+                        const key_code = labels_lookup.get(key_label) orelse 0;
+                        self.keycode_keyboard_lookup[@as(usize, key_code + 8)] = @intCast(index);
+                    }
                 }
             }
         }
@@ -378,7 +369,7 @@ test "bounding box" {
         expected: struct { w: c_int, h: c_int },
     }{
         .{
-            .layout = @embedFile("resources/keyboard-layout.json"),
+            .layout = @embedFile("resources/layouts/60_iso.json"),
             .expected = .{ .w = 960, .h = 320 },
         },
 
@@ -474,13 +465,16 @@ pub fn main() !void {
 
     const typing_font_size = app_config.data.typing_font_size;
     const typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
-    const layout_path = app_config.data.layout_path;
     const theme_name = app_config.data.theme;
 
     var config_watch = try config.Watch.init(config_path);
     defer config_watch.deinit();
 
-    app_state = try getState(allocator, config_dir, layout_path, Layout.@"60_iso");
+    app_state = blk: {
+        const layout_path = app_config.data.layout_path;
+        const layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
+        break :blk try getState(allocator, config_dir, layout_path, layout);
+    };
     defer app_state.deinit();
 
     // window creation
@@ -569,9 +563,15 @@ pub fn main() !void {
                 .window_undecorated => {
                     rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
                 },
-                .layout_path => {
-                    std.debug.print("Reload layout from '{s}'\n", .{app_config.data.layout_path});
-                    if (getState(allocator, config_dir, app_config.data.layout_path, Layout.@"60_iso")) |new_state| {
+                .layout_path, .layout_preset => {
+                    const layout_path = app_config.data.layout_path;
+                    const layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
+                    if (layout_path.len != 0) {
+                        std.debug.print("Reload layout using file '{s}'\n", .{layout_path});
+                    } else {
+                        std.debug.print("Reload layout using preset '{s}'\n", .{@tagName(layout)});
+                    }
+                    if (getState(allocator, config_dir, app_config.data.layout_path, layout)) |new_state| {
                         app_state.deinit();
                         app_state = new_state;
                         rl.setWindowSize(app_state.window_width, app_state.window_height);
