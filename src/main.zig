@@ -479,9 +479,11 @@ pub fn main() !void {
         else => return err,
     };
 
+    // this option is not hot-reloadable yet:
     const typing_font_size = app_config.data.typing_font_size;
-    const typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
-    const theme_name = app_config.data.theme;
+
+    var typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
+    var key_tint_color: rl.Color = rl.Color.fromInt(app_config.data.key_tint_color);
 
     var config_watch = try config.Watch.init(config_path);
     defer config_watch.deinit();
@@ -531,7 +533,7 @@ pub fn main() !void {
     };
 
     var keycap_texture = blk: {
-        const theme = Theme.fromString(theme_name) orelse unreachable;
+        const theme = Theme.fromString(app_config.data.theme) orelse unreachable;
         break :blk loadTexture(theme);
     };
     defer rl.unloadTexture(keycap_texture);
@@ -607,6 +609,8 @@ pub fn main() !void {
                         std.debug.print("Got unrecognized theme: '{s}', reload aborted\n", .{app_config.data.theme});
                     }
                 },
+                .key_tint_color => key_tint_color = rl.Color.fromInt(app_config.data.key_tint_color),
+                .typing_font_color => typing_font_color = rl.Color.fromInt(app_config.data.typing_font_color),
                 else => {},
             };
         }
@@ -642,8 +646,7 @@ pub fn main() !void {
         for (app_state.key_states) |k| {
             var dst = k.dst;
             if (k.pressed) dst.y += 5;
-            // TODO: tint color should be configurable
-            const tint = if (k.pressed) rl.Color.red else rl.Color.white;
+            const tint = if (k.pressed) key_tint_color else rl.Color.white;
             rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
         }
 
