@@ -9,7 +9,7 @@
         },
         .@"raylib-zig" = .{
             .url = "https://github.com/Not-Nik/raylib-zig/archive/devel.tar.gz",
-            .hash = "12202f8c415153088be8df39a51e0a4c9d402afd403422a0dcc9afdd417e437a6fdb",
+            .hash = "122062d2421175ba6bf89382c86621270e4883f1074ee4cc09da282e231bdef57328",
         },
         .@"known-folders" = .{
             .url = "git+https://github.com/ziglibs/known-folders.git#1cceeb70e77dec941a4178160ff6c8d05a74de6f",
