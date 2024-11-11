@@ -190,9 +190,14 @@ pub fn listener(app_state: *AppState, app_window: x11.Window, record_file: ?[]co
                     app_state.updateKeyStates(keycode, cookie.evtype == x11.XI_KeyPress);
 
                     if (cookie.evtype == x11.XI_KeyPress) {
-                        app_state.last_char_timestamp = std.time.timestamp();
                         var key: KeyData = std.mem.zeroInit(KeyData, .{});
                         _ = input_ctx.lookupString(device_event, &key);
+
+                        if (key.string[0] != 0) {
+                            // update only for keys which produe output,
+                            // this will not include modifiers
+                            app_state.last_char_timestamp = std.time.timestamp();
+                        }
 
                         while (!app_state.keys.push(key)) : ({
                             // this is unlikely scenario - normal typing would not be fast enough
@@ -266,9 +271,12 @@ pub fn producer(app_state: *AppState, app_window: x11.Window, replay_file: []con
             );
 
             if (device_event.evtype == x11.XI_KeyPress) {
-                app_state.last_char_timestamp = std.time.timestamp();
                 var key: KeyData = std.mem.zeroInit(KeyData, .{});
                 _ = input_ctx.lookupString(&device_event, &key);
+
+                if (key.string[0] != 0) {
+                    app_state.last_char_timestamp = std.time.timestamp();
+                }
 
                 while (!app_state.keys.push(key)) : ({
                     // this is unlikely scenario - normal typing would not be fast enough
