@@ -421,12 +421,17 @@ pub fn main() !void {
     var config_watch = try config.Watch.init(config_path);
     defer config_watch.deinit();
 
+    var layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
+
     app_state = blk: {
         const layout_path = app_config.data.layout_path;
-        const layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
         break :blk try getState(allocator, config_dir, layout_path, layout);
     };
     defer app_state.deinit();
+
+    const number_of_layouts = std.enums.values(Layout).len;
+    var layout_index: usize = @intFromEnum(layout);
+    var reload_layout_gui: bool = false;
 
     // window creation
 
@@ -516,7 +521,7 @@ pub fn main() !void {
                 },
                 .layout_path, .layout_preset => {
                     const layout_path = app_config.data.layout_path;
-                    const layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
+                    layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
                     if (layout_path.len != 0) {
                         std.debug.print("Reload layout using file '{s}'\n", .{layout_path});
                     } else {
@@ -546,6 +551,21 @@ pub fn main() !void {
                 .typing_font_color => typing_font_color = rl.Color.fromInt(app_config.data.typing_font_color),
                 else => {},
             };
+        }
+
+        if (reload_layout_gui) {
+            reload_layout_gui = false;
+
+            layout = try std.meta.intToEnum(Layout, layout_index);
+            std.debug.print("Reload layout using preset '{s}'\n", .{@tagName(layout)});
+            if (getState(allocator, config_dir, "", layout)) |new_state| {
+                app_state.deinit();
+                app_state = new_state;
+                rl.setWindowSize(app_state.window_width, app_state.window_height);
+            } else |err| switch (err) {
+                error.FileNotFound => std.debug.print("Layout file not found, reload aborted\n", .{}),
+                else => unreachable,
+            }
         }
 
         if (app_state.keys.pop()) |k| {
@@ -610,6 +630,7 @@ pub fn main() !void {
             }
         }
 
+        // would prefer native controls in separate window, this gui is temporary:
         if (show_gui) {
             rl.drawRectangle(
                 0,
@@ -617,6 +638,46 @@ pub fn main() !void {
                 app_state.window_width,
                 app_state.window_height,
                 rl.Color{ .r = 255, .g = 255, .b = 255, .a = 196 },
+            );
+
+            // previous layout
+            if (1 == rgui.guiButton(
+                .{
+                    .x = 48,
+                    .y = 16,
+                    .width = 16,
+                    .height = 16,
+                },
+                "#118#",
+            )) {
+                layout_index = if (layout_index == 0) number_of_layouts - 1 else layout_index - 1;
+                std.debug.print("Set previous layout: {}\n", .{layout_index});
+                reload_layout_gui = true;
+            }
+            // next layout
+            if (1 == rgui.guiButton(
+                .{
+                    .x = 48 + 8 + 16,
+                    .y = 16,
+                    .width = 16,
+                    .height = 16,
+                },
+                "#119#",
+            )) {
+                layout_index = if (layout_index == number_of_layouts - 1) 0 else layout_index + 1;
+                std.debug.print("Set next layout: {}\n", .{layout_index});
+                reload_layout_gui = true;
+            }
+            var layout_label_buf: [2048]u8 = undefined;
+            const layout_label = try std.fmt.bufPrintZ(&layout_label_buf, "Layout: {s}", .{@tagName(layout)});
+            _ = rgui.guiLabel(
+                .{
+                    .x = 48 + 8 + 16 + 16 + 8,
+                    .y = 16,
+                    .width = 256,
+                    .height = 16,
+                },
+                layout_label,
             );
 
             if (1 == rgui.guiButton(
