@@ -444,16 +444,32 @@ pub fn main() !void {
 
     // config handling
 
-    const executable_dir = try known_folders.getPath(allocator, .executable_dir) orelse unreachable;
-    defer allocator.free(executable_dir);
-    std.debug.print("executable_dir {s}\n", .{executable_dir});
+    const config_path = blk: {
+        const executable_dir = try known_folders.getPath(allocator, .executable_dir) orelse unreachable;
+        defer allocator.free(executable_dir);
+        std.debug.print("executable_dir {s}\n", .{executable_dir});
 
-    // config parse:
-    // TODO: for now look for config file only in executable dir, later should use XDG rules
-    const config_dir = executable_dir;
-    // use '\0' terminated alloc because this will be passed to inotify syscalls (in c)
-    const config_path = try std.fmt.allocPrintZ(allocator, "{s}/config", .{config_dir});
+        // use '\0' terminated alloc because this will be passed to inotify syscalls (in c)
+        var conf = try std.fmt.allocPrintZ(allocator, "{s}/config", .{executable_dir});
+        if (cwd.openFile(conf, .{})) |file| {
+            file.close();
+            std.debug.print("Use config file from executable directory\n", .{});
+            break :blk conf;
+        } else |_| {
+            allocator.free(conf);
+
+            // check in local configuration dir
+            const local_configuration_dir = try known_folders.getPath(allocator, .local_configuration) orelse unreachable;
+            defer allocator.free(local_configuration_dir);
+            std.debug.print("local_configuration_dir {s}\n", .{local_configuration_dir});
+
+            conf = try std.fmt.allocPrintZ(allocator, "{s}/klawa/config", .{local_configuration_dir});
+            break :blk conf;
+        }
+    };
     defer allocator.free(config_path);
+
+    const config_dir = fs.path.dirname(config_path) orelse "";
 
     var app_config = config.configManager(ConfigData, allocator);
     defer app_config.deinit();
