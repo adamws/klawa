@@ -12,8 +12,6 @@ const glfw = struct {
     pub const getX11Window = glfwGetX11Window;
 };
 
-pub const getX11Window = glfw.glfwGetX11Window;
-
 const AppState = @import("main.zig").AppState;
 
 pub const KeyData = struct {
@@ -123,12 +121,15 @@ fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
     _ = x11.XSync(display.?, 0);
 }
 
-pub fn listener(app_state: *AppState, app_window: x11.Window, record_file: ?[]const u8) !void {
+pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[]const u8) !void {
     defer {
         std.debug.print("defer x11Listener\n", .{});
         x11_thread_active = false;
     }
     x11_thread_active = true;
+
+    const app_window = glfw.getX11Window(@ptrCast(window_handle));
+    std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
 
     const display: *x11.Display = x11.XOpenDisplay(null) orelse {
         std.debug.print("Unable to connect to X server\n", .{});
@@ -222,12 +223,15 @@ pub fn listener(app_state: *AppState, app_window: x11.Window, record_file: ?[]co
 
 // uses events stored in file to reproduce them
 // assumes that only expected event types are recorded
-pub fn producer(app_state: *AppState, app_window: x11.Window, replay_file: []const u8, loop: bool) !void {
+pub fn producer(app_state: *AppState, window_handle: *anyopaque, replay_file: []const u8, loop: bool) !void {
     defer {
         std.debug.print("defer x11Producer\n", .{});
         x11_thread_active = false;
     }
     x11_thread_active = true;
+
+    const app_window = glfw.getX11Window(@ptrCast(window_handle));
+    std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
 
     const display: *x11.Display = x11.XOpenDisplay(null) orelse {
         std.debug.print("Unable to connect to X server\n", .{});

@@ -442,8 +442,7 @@ pub fn main() !void {
     rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
     rl.setExitKey(rl.KeyboardKey.key_null);
 
-    const app_window = x11.getX11Window(@ptrCast(rl.getWindowHandle()));
-    std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
+    const window_handle = rl.getWindowHandle();
 
     // TODO: is this even needed?
     rl.setTargetFPS(60);
@@ -461,10 +460,10 @@ pub fn main() !void {
     if (res.args.replay) |replay_file| {
         // TODO: this will start processing events before rendering ready, add synchronization
         const loop = res.args.@"replay-loop" != 0;
-        thread = try std.Thread.spawn(.{}, x11.producer, .{ &app_state, app_window, replay_file, loop });
+        thread = try std.Thread.spawn(.{}, x11.producer, .{ &app_state, window_handle, replay_file, loop });
     } else {
         // TODO: assign to thread var when close supported, join on this thread won't work now
-        _ = try std.Thread.spawn(.{}, x11.listener, .{ &app_state, app_window, res.args.record });
+        _ = try std.Thread.spawn(.{}, x11.listener, .{ &app_state, window_handle, res.args.record });
     }
     defer if (thread) |t| {
         t.join();
