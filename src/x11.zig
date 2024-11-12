@@ -180,7 +180,9 @@ pub fn listener(app_state: *AppState, app_window: x11.Window, record_file: ?[]co
             switch (cookie.evtype) {
                 x11.XI_KeyPress, x11.XI_KeyRelease => {
                     const device_event: *x11.XIDeviceEvent = @alignCast(@ptrCast(cookie.data));
-                    const keycode: usize = @intCast(device_event.detail);
+                    // offset by 8 to map x11 codes to linux input event codes
+                    // (defined in linux/input-event-codes.h system header):
+                    const keycode: usize = @intCast(device_event.detail - 8);
 
                     if (event_file) |file| {
                         const device_event_data: [*]u8 = @ptrCast(device_event);
@@ -266,7 +268,7 @@ pub fn producer(app_state: *AppState, app_window: x11.Window, replay_file: []con
             // do stuff with event-from-file
 
             app_state.updateKeyStates(
-                @intCast(device_event.detail),
+                @intCast(device_event.detail - 8),
                 device_event.evtype == x11.XI_KeyPress,
             );
 

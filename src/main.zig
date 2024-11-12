@@ -209,7 +209,7 @@ pub const AppState = struct {
                     while (iter.next()) |part| {
                         const key_label = try std.fmt.bufPrint(&universal_key_label, "KC_{s}", .{part});
                         const key_code = labels_lookup.get(key_label) orelse 0;
-                        self.keycode_keyboard_lookup[@as(usize, key_code + 8)] = @intCast(index);
+                        self.keycode_keyboard_lookup[@as(usize, key_code)] = @intCast(index);
                     }
                 }
             }
