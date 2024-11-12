@@ -79,6 +79,21 @@ const KeyOnScreen = struct {
     pressed: bool,
 };
 
+pub const KeyData = struct {
+    pressed: bool,
+    repeated: bool,
+    keycode: u8,
+    keysym: c_ulong,
+    status: c_int,
+    symbol: [*c]u8, // owned by x11, in static area. Must not be modified.
+    string: [32]u8,
+
+    comptime {
+        // this type is is copied a lot, keep it small
+        std.debug.assert(@sizeOf(KeyData) <= 64);
+    }
+};
+
 const CodepointBuffer = struct {
     write_index: Index = 0,
     data: [capacity]i32 = .{0} ** capacity,
@@ -137,7 +152,7 @@ pub const AppState = struct {
     keys: Queue = Queue.init(),
     last_char_timestamp: i64 = 0,
 
-    const Queue = SpscQueue(32, x11.KeyData);
+    const Queue = SpscQueue(32, KeyData);
     const KEY_1U_PX = 64;
 
     pub fn init(allocator: std.mem.Allocator, parsed: std.json.Parsed(kle.Keyboard)) !AppState {

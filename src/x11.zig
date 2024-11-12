@@ -13,21 +13,7 @@ const glfw = struct {
 };
 
 const AppState = @import("main.zig").AppState;
-
-pub const KeyData = struct {
-    pressed: bool,
-    repeated: bool,
-    keycode: x11.KeyCode,
-    keysym: x11.KeySym,
-    status: x11.Status,
-    symbol: [*c]u8, // owned by x11, in static area. Must not be modified.
-    string: [32]u8,
-
-    comptime {
-        // this type is is copied a lot, keep it small
-        std.debug.assert(@sizeOf(KeyData) <= 64);
-    }
-};
+const KeyData = @import("main.zig").KeyData;
 
 const X11InputContext = struct {
     display: *x11.Display,
