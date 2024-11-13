@@ -13,7 +13,12 @@ const config = @import("config.zig");
 const kle = @import("kle.zig");
 const math = @import("math.zig");
 const tracy = @import("tracy.zig");
-const x11 = @import("x11.zig");
+
+const backend = switch (builtin.target.os.tag) {
+    .linux => @import("x11.zig"),
+    .windows => @import("win32.zig"),
+    else => @compileError("unsupported platform"),
+};
 
 const labels_lookup = @import("layout_labels.zig").labels_lookup;
 const symbols_lookup = @import("symbols_lookup.zig").symbols_lookup;
@@ -86,7 +91,7 @@ pub const KeyData = struct {
     keycode: u8,
     keysym: c_ulong,
     status: c_int,
-    symbol: [*c]u8, // owned by x11, in static area. Must not be modified.
+    symbol: [*c]const u8, // owned by x11, in static area. Must not be modified.
     string: [32]u8,
 
     comptime {
@@ -394,6 +399,18 @@ pub fn main() !void {
     // config handling
 
     const config_path = blk: {
+
+        if (builtin.os.tag == .windows) {
+            // check if inside wine, known_folders crashes on wine (did not debug it yet)
+            const kernel32 = std.os.windows.kernel32;
+            const ntdll = kernel32.GetModuleHandleW(std.unicode.utf8ToUtf16LeStringLiteral("ntdll.dll"));
+            const pwine = kernel32.GetProcAddress(ntdll.?, "wine_get_version");
+            if (@intFromPtr(pwine) != 0) {
+                std.debug.print("Running inside wine\n", .{});
+                break :blk try std.fmt.allocPrintZ(allocator, "config", .{});
+            }
+        }
+
         const executable_dir = try known_folders.getPath(allocator, .executable_dir) orelse unreachable;
         defer allocator.free(executable_dir);
         std.debug.print("executable_dir {s}\n", .{executable_dir});
@@ -476,10 +493,10 @@ pub fn main() !void {
     if (res.args.replay) |replay_file| {
         // TODO: this will start processing events before rendering ready, add synchronization
         const loop = res.args.@"replay-loop" != 0;
-        thread = try std.Thread.spawn(.{}, x11.producer, .{ &app_state, window_handle, replay_file, loop });
+        thread = try std.Thread.spawn(.{}, backend.producer, .{ &app_state, window_handle, replay_file, loop });
     } else {
         // TODO: assign to thread var when close supported, join on this thread won't work now
-        _ = try std.Thread.spawn(.{}, x11.listener, .{ &app_state, window_handle, res.args.record });
+        _ = try std.Thread.spawn(.{}, backend.listener, .{ &app_state, window_handle, res.args.record });
     }
     defer if (thread) |t| {
         t.join();
@@ -733,14 +750,14 @@ pub fn main() !void {
 
             try r.write(pixels.?);
 
-            if (!x11.x11_thread_active) {
+            if (!backend.x11_thread_active) {
                 exit_window = true;
             }
         }
     }
 
     // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
-    x11.run_x11_thread = false;
+    backend.run_x11_thread = false;
 
     if (renderer) |*r| try r.wait();
 

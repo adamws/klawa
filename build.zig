@@ -47,7 +47,11 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibC();
 
-    const system_libs = [_][]const u8{ "X11", "Xi" };
+    const system_libs = switch (target.result.os.tag) {
+        .linux => &[_][]const u8{"X11", "Xi"},
+        else => &[_][]const u8{},
+    };
+
     for (system_libs) |lib| {
         exe.linkSystemLibrary(lib);
     }

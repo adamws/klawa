@@ -4,6 +4,12 @@ tracy_path := "/home/aws/git/tracy"
 run:
   zig build run
 
+build-win:
+  zig build -Dtarget=x86_64-windows
+
+run-win:
+  wine zig-out/bin/klawa.exe
+
 run-tracy:
   zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack
 
