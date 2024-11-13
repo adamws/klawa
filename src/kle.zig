@@ -310,7 +310,7 @@ pub fn parseFromSlice(
     };
 }
 
-const expect = @import("std").testing.expect;
+const testing = @import("std").testing;
 
 fn makeTestCase(comptime name: []const u8) type {
     return struct {
@@ -327,7 +327,7 @@ fn makeTestCase(comptime name: []const u8) type {
             try json.stringify(kle.value, .{ .whitespace = .indent_2 }, out.writer());
 
             const reference = @embedFile(std.fmt.comptimePrint("test_data/{s}-internal.json", .{name}));
-            try std.testing.expect(std.mem.eql(u8, out.items, reference));
+            try testing.expectEqualStrings(reference, out.items);
         }
     };
 }
