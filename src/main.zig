@@ -21,6 +21,7 @@ const symbols_lookup = @import("symbols_lookup.zig").symbols_lookup;
 const Ffmpeg = @import("ffmpeg.zig").Ffmpeg;
 const Layout = @import("layout.zig").Layout;
 const SpscQueue = @import("spsc_queue.zig").SpscQueue;
+const Watch = @import("watch.zig").Watch;
 
 const gl = struct {
     pub const PixelFormat = enum(c_uint) {
@@ -433,7 +434,7 @@ pub fn main() !void {
     var typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
     var key_tint_color: rl.Color = rl.Color.fromInt(app_config.data.key_tint_color);
 
-    var config_watch = try config.Watch.init(config_path);
+    var config_watch = try Watch.init(config_path);
     defer config_watch.deinit();
 
     var layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
