@@ -16,15 +16,15 @@ var app_state_l: *AppState = undefined;
 var hook: ?c.HHOOK = null;
 
 fn keyEventToString(vk: u32, scan_code: u32, string: []u8) !void {
-    var keyboard_state: [256]u8 = undefined;
+    var keyboard_state: [256]u8 = .{0} ** 256;
 
-    if (c.GetKeyboardState(&keyboard_state) == 0) {
-        return error.KeyboardStateErr;
-    }
+    const shift: c_short = c.GetKeyState(c.VK_SHIFT);
+    keyboard_state[c.VK_SHIFT] = @bitCast(@as(i8, @truncate(shift >> 8)));
 
     var buffer: [16]u16 = undefined;
-    const len = c.ToUnicode(vk, scan_code, &keyboard_state, &buffer, buffer.len, 0);
-    const buffer_slice = buffer[0..@as(usize, @intCast(len))];
+    const len: usize = @intCast(c.ToUnicode(vk, scan_code, &keyboard_state, &buffer, buffer.len, 0));
+    const buffer_slice = buffer[0..len];
+
 
     _ = try std.unicode.utf16LeToUtf8(string, buffer_slice);
 }
