@@ -17,16 +17,21 @@ pub var x11_thread_active: bool = false;
 pub var run_x11_thread: bool = true;
 
 var app_state_l: *AppState = undefined;
+var layout: c.HKL = undefined;
 var hook: ?c.HHOOK = null;
 
 fn keyEventToString(vk: u32, scan_code: u32, string: []u8) !void {
     var keyboard_state: [256]u8 = .{0} ** 256;
 
-    const shift: c_short = c.GetKeyState(c.VK_SHIFT);
-    keyboard_state[c.VK_SHIFT] = @bitCast(@as(i8, @truncate(shift >> 8)));
+    const modifiers = [_]c_int{c.VK_SHIFT, c.VK_MENU, c.VK_CONTROL};
+
+    for (modifiers) |m| {
+        const value: c_short = c.GetKeyState(m);
+        keyboard_state[@as(usize, @intCast(m))] = @bitCast(@as(i8, @truncate(value >> 8)));
+    }
 
     var buffer: [16]u16 = undefined;
-    const len: usize = @intCast(c.ToUnicode(vk, scan_code, &keyboard_state, &buffer, buffer.len, 0));
+    const len: usize = @intCast(c.ToUnicodeEx(vk, scan_code, &keyboard_state, &buffer, buffer.len, 0, layout));
     const buffer_slice = buffer[0..len];
 
     _ = try std.unicode.utf16LeToUtf8(string, buffer_slice);
@@ -36,9 +41,9 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
     if (nCode == c.HC_ACTION) {
         const keyboard: *const c.KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @intCast(lParam)));
 
-        app_state_l.updateKeyStates(keyboard.vkCode, wParam == c.WM_KEYDOWN);
+        app_state_l.updateKeyStates(keyboard.vkCode, wParam == c.WM_KEYDOWN or wParam == c.WM_SYSKEYDOWN);
 
-        if (wParam == c.WM_KEYDOWN) {
+        if (wParam == c.WM_KEYDOWN or wParam == c.WM_SYSKEYDOWN) {
             var key: KeyData = std.mem.zeroInit(KeyData, .{});
 
             key.keycode = @intCast(keyboard.vkCode);
@@ -49,6 +54,9 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
 
             var index = @as(usize, @intCast(keyboard.scanCode));
             if (extended) index += 0x100;
+            if (index >= kbd_en_vscname.len) {
+                index = 0;
+            }
             key.symbol = kbd_en_vscname[index].ptr;
 
             std.debug.print("Pressed vk: '{}', scancode: '{}' extended: {}, string: '{s}', symbol: '{s}'\n", .{
@@ -71,6 +79,7 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
     _ = record_file;
 
     app_state_l = app_state;
+    layout = c.GetKeyboardLayout(0);
 
     hook = c.SetWindowsHookExA(c.WH_KEYBOARD_LL, lowLevelKeyboardProc, null, 0).?;
     defer _ = c.UnhookWindowsHookEx(hook.?);
