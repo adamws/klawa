@@ -43,7 +43,7 @@ const symbols_lookup_slice = [_]SymbolsLookupKV{
     .{ "KP_Up",        "8ᴷᴾ"     },
     .{ "KP_Prior",     "9ᴷᴾ"     },
     .{ "KP_Insert",    "0ᴷᴾ"     },
-    .{ "KP_Delete",    "(.)"     },
+    .{ "KP_Separator", "(.)"     },
     .{ "KP_Add",       "(+)"     },
     .{ "KP_Subtract",  "(-)"     },
     .{ "KP_Multiply",  "(*)"     },

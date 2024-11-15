@@ -1,7 +1,11 @@
 const std = @import("std");
 const fs = std.fs;
 
+// References:
+// https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input
+
 const c = @cImport({
+  @cDefine("WINDOWS_LEAN_AND_MEAN", "");
   @cInclude("windows.h");
 });
 
@@ -25,7 +29,6 @@ fn keyEventToString(vk: u32, scan_code: u32, string: []u8) !void {
     const len: usize = @intCast(c.ToUnicode(vk, scan_code, &keyboard_state, &buffer, buffer.len, 0));
     const buffer_slice = buffer[0..len];
 
-
     _ = try std.unicode.utf16LeToUtf8(string, buffer_slice);
 }
 
@@ -42,8 +45,15 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
 
             app_state_l.last_char_timestamp = std.time.timestamp();
             keyEventToString(keyboard.vkCode, keyboard.scanCode, &key.string) catch {};
+            const extended: bool = ((keyboard.flags & c.LLKHF_EXTENDED) != 0);
 
-            key.symbol = kbd_en_vscname[@as(usize, @intCast(keyboard.scanCode))].ptr;
+            var index = @as(usize, @intCast(keyboard.scanCode));
+            if (extended) index += 0x100;
+            key.symbol = kbd_en_vscname[index].ptr;
+
+            std.debug.print("Pressed vk: '{}', scancode: '{}' extended: {}, string: '{s}', symbol: '{s}'\n", .{
+                keyboard.vkCode, keyboard.scanCode, extended, std.mem.sliceTo(&key.string, 0), key.symbol
+            });
 
             while (!app_state_l.keys.push(key)) : ({
                 // this is unlikely scenario - normal typing would not be fast enough
@@ -87,9 +97,9 @@ const kbd_en_vscname = [_][]const u8 {
     "", "Escape", "", "", "", "", "", "", "", "", "", "", "", "", "BackSpace", "Tab",
     "", "", "", "", "", "", "", "", "", "", "", "", "Return", "Ctrl", "", "",
     "", "", "", "", "", "", "", "", "", "", "Shift", "", "", "", "", "",
-    "", "", "", "", "", "", "Right Shift", "Num *", "Alt", "space", "Caps Lock", "F1", "F2", "F3", "F4", "F5",
-    "F6", "F7", "F8", "F9", "F10", "Pause", "Scroll Lock", "Num 7", "Num 8", "Num 9", "Num -", "Num 4", "Num 5", "Num 6", "Num +", "Num 1",
-    "Num 2", "Num 3", "Num 0", "Num Del", "Sys Req", "", "", "F11", "F12", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "Right Shift", "KP_Multiply", "Alt", "space", "Caps_Lock", "F1", "F2", "F3", "F4", "F5",
+    "F6", "F7", "F8", "F9", "F10", "Pause", "Scroll_Lock", "KP_7", "KP_8", "KP_9", "KP_Subtract", "KP_4", "KP_5", "KP_6", "KP_Add", "KP_1",
+    "KP_2", "KP_3", "KP_0", "KP_Separator", "Sys Req", "", "", "F11", "F12", "", "", "", "", "", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "F13", "F14", "F15", "F16",
     "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "", "", "", "", "", "", "", "",
@@ -102,11 +112,11 @@ const kbd_en_vscname = [_][]const u8 {
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     // extended
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "", "", "", "", "Num Enter", "Right Ctrl", "", "",
+    "", "", "", "", "", "", "", "", "", "", "", "", "KP_Enter", "Right Ctrl", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "Num /", "", "Prnt Scrn", "Right Alt", "", "", "", "", "", "", "",
-    "", "", "", "", "", "Num ock", "Break", "Home", "Up", "Page Up", "", "eft", "", "Right", "", "End",
-    "Down", "Page Down", "Insert", "Delete", "<00>", "", "Help", "", "", "", "", "Left Windows", "Right Windows", "Application", "", "",
+    "", "", "", "", "", "KP_Divide", "", "Print", "Right Alt", "", "", "", "", "", "", "",
+    "", "", "", "", "", "Num_Lock", "Break", "Home", "Up", "Prior", "", "Left", "", "Right", "", "End",
+    "Down", "Next", "Insert", "Delete", "<00>", "", "Help", "", "", "", "", "Super_L", "Super_R", "Application", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
