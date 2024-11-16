@@ -83,8 +83,7 @@ const X11InputContext = struct {
     }
 };
 
-pub var x11_thread_active: bool = false;
-pub var run_x11_thread: bool = true;
+pub var is_running: bool = false;
 
 fn xiSetMask(ptr: []u8, event: usize) void {
     const offset: u3 = @truncate(event);
@@ -110,9 +109,9 @@ fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
 pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[]const u8) !void {
     defer {
         std.debug.print("defer x11Listener\n", .{});
-        x11_thread_active = false;
+        is_running = false;
     }
-    x11_thread_active = true;
+    is_running = true;
 
     const app_window = glfw.getX11Window(@ptrCast(window_handle));
     std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
@@ -212,9 +211,9 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
 pub fn producer(app_state: *AppState, window_handle: *anyopaque, replay_file: []const u8, loop: bool) !void {
     defer {
         std.debug.print("defer x11Producer\n", .{});
-        x11_thread_active = false;
+        is_running = false;
     }
-    x11_thread_active = true;
+    is_running = true;
 
     const app_window = glfw.getX11Window(@ptrCast(window_handle));
     std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
@@ -244,7 +243,7 @@ pub fn producer(app_state: *AppState, window_handle: *anyopaque, replay_file: []
         var previous_timestamp: x11.Time = 0;
 
         while (reader.readStruct(x11.XIDeviceEvent)) |device_event| {
-            if (!run_x11_thread) {
+            if (!is_running) {
                 break :out;
             }
             timestamp = device_event.time;

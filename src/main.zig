@@ -750,14 +750,14 @@ pub fn main() !void {
 
             try r.write(pixels.?);
 
-            if (!backend.x11_thread_active) {
+            if (!backend.is_running) {
                 exit_window = true;
             }
         }
     }
 
     // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
-    backend.run_x11_thread = false;
+    backend.is_running = false;
 
     if (renderer) |*r| try r.wait();
 
