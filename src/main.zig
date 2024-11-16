@@ -69,6 +69,8 @@ pub const Theme = enum {
 
 const ConfigData = struct {
     window_undecorated: bool = true,
+    window_transparency: bool = false,
+    background_color: u32 = 0x000000ff,
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
     layout_preset: []const u8 = "tkl_ansi",
@@ -448,6 +450,7 @@ pub fn main() !void {
     // this option is not hot-reloadable yet:
     const typing_font_size = app_config.data.typing_font_size;
 
+    var background_color: rl.Color = rl.Color.fromInt(app_config.data.background_color);
     var typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
     var key_tint_color: rl.Color = rl.Color.fromInt(app_config.data.key_tint_color);
 
@@ -468,7 +471,14 @@ pub fn main() !void {
 
     // window creation
 
-    rl.setConfigFlags(.{ .msaa_4x_hint = true, .vsync_hint = true, .window_highdpi = true });
+    rl.setConfigFlags(.{
+        // experimentation shown that window transparency does not work when msaa_4x_hint enabled
+        // (at least on my linux machine with compton composition manager)
+        .msaa_4x_hint = if (app_config.data.window_transparency) false else true,
+        .vsync_hint = true,
+        .window_highdpi = true,
+        .window_transparent = app_config.data.window_transparency,
+    });
     rl.initWindow(app_state.window_width, app_state.window_height, "klawa");
     defer rl.closeWindow();
 
@@ -602,8 +612,9 @@ pub fn main() !void {
                         std.debug.print("Got unrecognized theme: '{s}', reload aborted\n", .{app_config.data.theme});
                     }
                 },
-                .key_tint_color => key_tint_color = rl.Color.fromInt(app_config.data.key_tint_color),
+                .background_color => background_color = rl.Color.fromInt(app_config.data.background_color),
                 .typing_font_color => typing_font_color = rl.Color.fromInt(app_config.data.typing_font_color),
+                .key_tint_color => key_tint_color = rl.Color.fromInt(app_config.data.key_tint_color),
                 else => {},
             };
         }
@@ -645,9 +656,7 @@ pub fn main() !void {
         }
 
         rl.beginDrawing();
-        // TODO: background color should be configurable
-        // TODO: research window transparency
-        rl.clearBackground(rl.Color.black);
+        rl.clearBackground(background_color);
 
         const rot = rl.Vector2{ .x = 0, .y = 0 };
 
