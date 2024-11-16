@@ -549,7 +549,7 @@ pub fn main() !void {
             exit_window = true;
         }
 
-        if (rl.isMouseButtonPressed(rl.MouseButton.mouse_button_left)) {
+        if (rl.isMouseButtonPressed(rl.MouseButton.mouse_button_middle)) {
             std.debug.print("Toggle settings\n", .{});
             show_gui = !show_gui;
         }
