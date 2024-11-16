@@ -532,14 +532,37 @@ pub fn main() !void {
 
     var codepoints_buffer = CodepointBuffer{};
 
+    var drag_reference_position = rl.getWindowPosition();
+
     while (!exit_window) {
         if (rl.windowShouldClose()) {
             exit_window = true;
         }
 
-        if (rl.isMouseButtonPressed(rl.MouseButton.mouse_button_right)) {
+        if (rl.isMouseButtonPressed(rl.MouseButton.mouse_button_left)) {
             std.debug.print("Toggle settings\n", .{});
             show_gui = !show_gui;
+        }
+
+        if (rl.isMouseButtonDown(rl.MouseButton.mouse_button_right)) {
+            if (rl.isMouseButtonPressed(rl.MouseButton.mouse_button_right)) {
+                drag_reference_position = rl.getMousePosition();
+                rl.setMouseCursor(rl.MouseCursor.mouse_cursor_resize_all);
+            }
+
+            const current_position: rl.Vector2 = blk: {
+                const p = try backend.get_mouse_position();
+                break :blk .{
+                    .x = @floatFromInt(p.x),
+                    .y = @floatFromInt(p.y),
+                };
+            };
+            const win_pos = current_position.subtract(drag_reference_position);
+            rl.setWindowPosition(@intFromFloat(@round(win_pos.x)), @intFromFloat(@round(win_pos.y)));
+        }
+
+        if (rl.isMouseButtonReleased(rl.MouseButton.mouse_button_right)) {
+            rl.setMouseCursor(rl.MouseCursor.mouse_cursor_arrow);
         }
 
         // TODO: handle errors

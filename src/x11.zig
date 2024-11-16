@@ -298,3 +298,45 @@ pub fn producer(app_state: *AppState, window_handle: *anyopaque, replay_file: []
     }
 }
 
+pub fn get_mouse_position() !struct { x: usize, y: usize } {
+    // Open a connection to the X server
+    const display: *x11.Display = x11.XOpenDisplay(null) orelse {
+        std.debug.print("Unable to connect to X server\n", .{});
+        return error.X11InitializationFailed;
+    };
+    defer _ = x11.XCloseDisplay(display);
+
+    // Get the root window for the current screen
+    const screen = x11.XDefaultScreen(display);
+    const root: x11.Window = x11.XRootWindow(display, screen);
+    defer _ = x11.XDestroyWindow(display, root);
+
+    var root_return: x11.Window = undefined;
+    var child_return: x11.Window = undefined;
+    var root_x_return: i32 = -1;
+    var root_y_return: i32 = -1;
+    var win_x_return: i32 = 0;
+    var win_y_return: i32 = 0;
+    var mask_return: u32 = 0;
+
+    _ = x11.XQueryPointer(
+        display,
+        root,
+        &root_return,
+        &child_return,
+        &root_x_return,
+        &root_y_return,
+        &win_x_return,
+        &win_y_return,
+        &mask_return,
+    );
+
+    if (root_x_return == -1 or root_y_return == -1) {
+        return error.MouseError;
+    }
+
+    return .{
+        .x = @intCast(root_x_return),
+        .y = @intCast(root_y_return),
+    };
+}
