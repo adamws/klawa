@@ -55,7 +55,7 @@ pub fn ConfigManager(comptime ConfigType: type) type {
 
                     var change_found = false;
                     switch (@typeInfo(field.type)) {
-                        .Bool, .Int => change_found = old != new,
+                        .Bool, .Int, .Float => change_found = old != new,
                         .Pointer => |ptr| change_found = !std.mem.eql(ptr.child, old, new),
                         else => return error.UnsupportedConfigFieldType,
                     }
@@ -111,6 +111,9 @@ pub fn ConfigManager(comptime ConfigType: type) type {
                                     },
                                     .Int => {
                                         @field(data, field.name) = try std.fmt.parseInt(field.type, kv.value, 0);
+                                    },
+                                    .Float => {
+                                        @field(data, field.name) = try std.fmt.parseFloat(field.type, kv.value);
                                     },
                                     .Pointer => {
                                         if (std.meta.sentinel(field.type)) |sentinel| {

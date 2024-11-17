@@ -78,6 +78,7 @@ const ConfigData = struct {
     theme: []const u8 = "default",
     show_typing: bool = true,
     key_tint_color: u32 = 0xff0000ff, // alpha=1
+    key_scale: f32 = 1.0,
 };
 
 const KeyOnScreen = struct {
@@ -157,13 +158,14 @@ pub const AppState = struct {
     keycode_keyboard_lookup: [256]i32,
     window_width: c_int,
     window_height: c_int,
+    scale: f32,
     keys: Queue = Queue.init(),
     last_char_timestamp: i64 = 0,
 
     const Queue = SpscQueue(32, KeyData);
     const KEY_1U_PX = 64;
 
-    pub fn init(allocator: std.mem.Allocator, parsed: std.json.Parsed(kle.Keyboard)) !AppState {
+    pub fn init(allocator: std.mem.Allocator, parsed: std.json.Parsed(kle.Keyboard), scale: f32) !AppState {
         var self: AppState = .{
             .allocator = allocator,
             .parsed = parsed,
@@ -172,10 +174,11 @@ pub const AppState = struct {
             .keycode_keyboard_lookup = .{-1} ** 256,
             .window_width = -1,
             .window_height = -1,
+            .scale = scale,
         };
+        calcualteWindoWize(&self);
         initKeys(&self);
         try calculateKeyLookup(&self);
-        calcualteWindoWize(&self);
         return self;
     }
 
@@ -198,10 +201,10 @@ pub const AppState = struct {
                 .height = height,
             };
             s.dst = rl.Rectangle{
-                .x = @floatCast(KEY_1U_PX * result.x),
-                .y = @floatCast(KEY_1U_PX * result.y),
-                .width = width,
-                .height = height,
+                .x = @as(f32, @floatCast(KEY_1U_PX * result.x)) * self.scale,
+                .y = @as(f32, @floatCast(KEY_1U_PX * result.y)) * self.scale,
+                .width = width * self.scale,
+                .height = height * self.scale,
             };
             s.angle = @floatCast(k.rotation_angle);
 
@@ -241,8 +244,8 @@ pub const AppState = struct {
 
     fn calcualteWindoWize(self: *AppState) void {
         const bbox = self.calculateBoundingBox();
-        self.window_width = @intFromFloat(bbox.w * KEY_1U_PX);
-        self.window_height = @intFromFloat(bbox.h * KEY_1U_PX);
+        self.window_width = @intFromFloat(bbox.w * KEY_1U_PX * self.scale);
+        self.window_height = @intFromFloat(bbox.h * KEY_1U_PX * self.scale);
         std.debug.print("Window size: {}x{}\n", .{ self.window_width, self.window_height });
     }
 
@@ -301,7 +304,7 @@ pub const AppState = struct {
     }
 };
 
-fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: []const u8, layout: Layout) !AppState {
+fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: []const u8, layout: Layout, scale: f32) !AppState {
     const kle_str: []const u8 = blk: {
         if (layout_path.len != 0) {
             std.debug.print("layout = {s}\n", .{layout_path});
@@ -316,7 +319,7 @@ fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: 
     defer allocator.free(kle_str);
 
     const keyboard = try kle.parseFromSlice(allocator, kle_str);
-    return AppState.init(allocator, keyboard);
+    return AppState.init(allocator, keyboard, scale);
 }
 
 test "bounding box" {
@@ -344,7 +347,7 @@ test "bounding box" {
     for (cases) |case| {
         const parsed = try kle.parseFromSlice(allocator, case.layout);
 
-        var s = try AppState.init(allocator, parsed);
+        var s = try AppState.init(allocator, parsed, 1.0);
         defer s.deinit();
 
         try std.testing.expect(s.window_width == case.expected.w);
@@ -461,7 +464,8 @@ pub fn main() !void {
 
     app_state = blk: {
         const layout_path = app_config.data.layout_path;
-        break :blk try getState(allocator, config_dir, layout_path, layout);
+        const scale = app_config.data.key_scale;
+        break :blk try getState(allocator, config_dir, layout_path, layout, scale);
     };
     defer app_state.deinit();
 
@@ -584,15 +588,16 @@ pub fn main() !void {
                 .window_undecorated => {
                     rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
                 },
-                .layout_path, .layout_preset => {
+                .layout_path, .layout_preset, .key_scale => {
                     const layout_path = app_config.data.layout_path;
+                    const scale = app_config.data.key_scale;
                     layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
                     if (layout_path.len != 0) {
                         std.debug.print("Reload layout using file '{s}'\n", .{layout_path});
                     } else {
                         std.debug.print("Reload layout using preset '{s}'\n", .{@tagName(layout)});
                     }
-                    if (getState(allocator, config_dir, app_config.data.layout_path, layout)) |new_state| {
+                    if (getState(allocator, config_dir, app_config.data.layout_path, layout, scale)) |new_state| {
                         app_state.deinit();
                         app_state = new_state;
                         rl.setWindowSize(app_state.window_width, app_state.window_height);
@@ -624,7 +629,7 @@ pub fn main() !void {
 
             layout = try std.meta.intToEnum(Layout, layout_index);
             std.debug.print("Reload layout using preset '{s}'\n", .{@tagName(layout)});
-            if (getState(allocator, config_dir, "", layout)) |new_state| {
+            if (getState(allocator, config_dir, "", layout, app_state.scale)) |new_state| {
                 app_state.deinit();
                 app_state = new_state;
                 rl.setWindowSize(app_state.window_width, app_state.window_height);
