@@ -369,6 +369,16 @@ fn loadTexture(theme: Theme) rl.Texture {
     return keycap_texture;
 }
 
+fn updateWindowFlag(comptime flag_name: []const u8, value: bool) void {
+    var flags = std.mem.zeroInit(rl.ConfigFlags, .{});
+    @field(flags, flag_name) = true;
+    if (value) {
+        rl.setWindowState(flags);
+    } else {
+        rl.clearWindowState(flags);
+    }
+}
+
 fn updateWindowPos(x: i32, y: i32) void {
     if (x != -1 and y != -1) {
         rl.setWindowPosition(x, y);
@@ -588,8 +598,8 @@ pub fn main() !void {
             const changes = try app_config.loadFromFile(config_path);
             var iter = changes.iterator();
             while (iter.next()) |v| switch(v) {
-                .window_undecorated => {
-                    rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
+                inline .window_undecorated, .window_transparent, .window_topmost, .window_mouse_passthrough => |flag| {
+                    updateWindowFlag(@tagName(flag), @field(app_config.data, @tagName(flag)));
                 },
                 .window_position_x, .window_position_y => {
                     updateWindowPos(app_config.data.window_position_x, app_config.data.window_position_y);
