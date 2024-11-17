@@ -527,16 +527,12 @@ pub fn main() !void {
 
     // TODO: font should be configurable
     const font = rl.loadFontFromMemory(".ttf", font_data, typing_font_size, codepoints);
-    const default_font = rl.getFontDefault();
 
     const typing_glyph_size = rl.getGlyphAtlasRec(font, 0);
     const typing_glyph_width: c_int = @intFromFloat(typing_glyph_size.width);
 
     var exit_window = false;
     var show_gui = false;
-
-    const exit_label = "Exit Application";
-    const exit_text_width = rl.measureText(exit_label, default_font.baseSize);
 
     const typing_persistance_sec = 2;
 
@@ -680,25 +676,15 @@ pub fn main() !void {
             }
         }
 
-        // would prefer native controls in separate window, this gui is temporary:
+        // button for closing application when window decorations disabled,
+        // toggled with mouse middle click
         if (show_gui) {
-            rl.drawRectangle(
-                0,
-                0,
-                app_state.window_width,
-                app_state.window_height,
-                rl.Color{ .r = 255, .g = 255, .b = 255, .a = 196 },
-            );
+            const status_bar_rect = rl.Rectangle.init(0, 0, @floatFromInt(app_state.window_width), 24);
+            const button_rect = rl.Rectangle.init(status_bar_rect.width - 24, 3, 18, 18);
 
-            if (1 == rgui.guiButton(
-                .{
-                    .x = @floatFromInt(app_state.window_width - 48 - exit_text_width),
-                    .y = 16,
-                    .width = @floatFromInt(32 + exit_text_width),
-                    .height = 32,
-                },
-                std.fmt.comptimePrint("#113#{s}", .{exit_label}),
-            )) {
+            rgui.guiSetStyle(.statusbar, @intFromEnum(rgui.GuiControlProperty.text_alignment), @intFromEnum(rgui.GuiTextAlignment.text_align_right));
+            _ = rgui.guiStatusBar(status_bar_rect, "Exit");
+            if (1 == rgui.guiButton(button_rect, "#113#")) {
                 exit_window = true;
             }
         }
