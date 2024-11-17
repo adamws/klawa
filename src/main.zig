@@ -213,7 +213,7 @@ pub const AppState = struct {
             if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
                 s.src.x = 0;
                 s.src.y = 1824;
-                s.dst.x -= 0.25 * KEY_1U_PX;
+                s.dst.x -= 0.25 * KEY_1U_PX * self.scale;
             } else if (k.width == 1.0 and k.height == 2.0) {
                 s.src.x = 0;
                 s.src.y = 1824 - 128;
