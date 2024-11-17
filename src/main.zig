@@ -528,9 +528,6 @@ pub fn main() !void {
     // TODO: font should be configurable
     const font = rl.loadFontFromMemory(".ttf", font_data, typing_font_size, codepoints);
 
-    const typing_glyph_size = rl.getGlyphAtlasRec(font, 0);
-    const typing_glyph_width: c_int = @intFromFloat(typing_glyph_size.width);
-
     var exit_window = false;
     var show_gui = false;
 
@@ -659,20 +656,23 @@ pub fn main() !void {
                 rl.Color{ .r = 0, .g = 0, .b = 0, .a = 128 },
             );
 
-            var offset: c_int = 0;
+            var offset: f32 = 0;
             var it = codepoints_buffer.iterator();
+
+            const scale_factor: f32 = @as(f32, @floatFromInt(typing_font_size)) / @as(f32, @floatFromInt(font.baseSize));
+
             while (it.next()) |cp| {
-                rl.drawTextCodepoint(
-                    font,
-                    cp,
-                    .{
-                        .x = @floatFromInt(@divTrunc(app_state.window_width - typing_glyph_width, 2) - offset),
-                        .y = @floatFromInt(@divTrunc(app_state.window_height - typing_font_size, 2)),
-                    },
-                    @floatFromInt(typing_font_size),
-                    typing_font_color,
+                const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
+                const glyph_position = rl.Vector2.init(
+                    @as(f32, @floatFromInt(@divTrunc(app_state.window_width, 2))) - offset,
+                    @floatFromInt(@divTrunc(app_state.window_height - typing_font_size, 2)),
                 );
-                offset += typing_glyph_width + 20;
+                rl.drawTextCodepoint(font, cp, glyph_position, @floatFromInt(typing_font_size), typing_font_color);
+
+                offset += switch (font.glyphs[glyph_index].advanceX) {
+                    0 => font.recs[glyph_index].width * scale_factor,
+                    else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
+                };
             }
         }
 
