@@ -7,7 +7,6 @@ const known_folders = @import("known-folders");
 const KnownFolder = known_folders.KnownFolder;
 
 const builtin = @import("builtin");
-const debug = (builtin.mode == std.builtin.OptimizeMode.Debug);
 
 const config = @import("config.zig");
 const kle = @import("kle.zig");
@@ -79,6 +78,7 @@ const ConfigData = struct {
     show_typing: bool = true,
     key_tint_color: u32 = 0xff0000ff, // alpha=1
     key_scale: f32 = 1.0,
+    draw_fps: bool = false,
 };
 
 const KeyOnScreen = struct {
@@ -762,7 +762,7 @@ pub fn main() !void {
             }
         }
 
-        if (debug) {
+        if (app_config.data.draw_fps) {
             rl.drawFPS(10, 10);
         }
         rl.endDrawing();
