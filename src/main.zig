@@ -68,7 +68,11 @@ pub const Theme = enum {
 
 const ConfigData = struct {
     window_undecorated: bool = true,
-    window_transparency: bool = false,
+    window_transparent: bool = false,
+    window_topmost: bool = true,
+    window_mouse_passthrough: bool = false, // warning: can't use close or move with mouse, must kill to exit
+    window_position_x: i32 = -1,
+    window_position_y: i32 = -1,
     background_color: u32 = 0x000000ff,
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
@@ -365,6 +369,12 @@ fn loadTexture(theme: Theme) rl.Texture {
     return keycap_texture;
 }
 
+fn updateWindowPos(x: i32, y: i32) void {
+    if (x != -1 and y != -1) {
+        rl.setWindowPosition(x, y);
+    }
+}
+
 pub fn main() !void {
     const trace_ = tracy.trace(@src());
     defer trace_.end();
@@ -474,13 +484,17 @@ pub fn main() !void {
     rl.setConfigFlags(.{
         // experimentation shown that window transparency does not work when msaa_4x_hint enabled
         // (at least on my linux machine with compton composition manager)
-        .msaa_4x_hint = if (app_config.data.window_transparency) false else true,
+        .msaa_4x_hint = if (app_config.data.window_transparent) false else true,
         .vsync_hint = true,
         .window_highdpi = true,
-        .window_transparent = app_config.data.window_transparency,
+        .window_transparent = app_config.data.window_transparent,
+        .window_topmost = app_config.data.window_topmost,
+        .window_mouse_passthrough = app_config.data.window_mouse_passthrough,
     });
     rl.initWindow(app_state.window_width, app_state.window_height, "klawa");
     defer rl.closeWindow();
+
+    updateWindowPos(app_config.data.window_position_x, app_config.data.window_position_y);
 
     rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
     rl.setExitKey(rl.KeyboardKey.key_null);
@@ -577,6 +591,9 @@ pub fn main() !void {
                 .window_undecorated => {
                     rl.setWindowState(.{ .window_undecorated = app_config.data.window_undecorated });
                 },
+                .window_position_x, .window_position_y => {
+                    updateWindowPos(app_config.data.window_position_x, app_config.data.window_position_y);
+                },
                 .layout_path, .layout_preset, .key_scale => {
                     const layout_path = app_config.data.layout_path;
                     const scale = app_config.data.key_scale;
@@ -590,6 +607,9 @@ pub fn main() !void {
                         app_state.deinit();
                         app_state = new_state;
                         rl.setWindowSize(app_state.window_width, app_state.window_height);
+                        // TODO: update window position when layout changed, probably should add
+                        // config option which will define reference points (corners + middle)
+                        //updateWindowPos(app_config.data.window_position_x, app_config.data.window_position_y);
                     } else |err| switch (err) {
                         error.FileNotFound => std.debug.print("Layout file not found, reload aborted\n", .{}),
                         else => unreachable,
