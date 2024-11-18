@@ -95,6 +95,18 @@ pub fn ConfigManager(comptime ConfigType: type) type {
             var line_buffer = std.ArrayList(u8).init(self.allocator);
             defer line_buffer.deinit();
 
+            // TODO: this could be smarter because we know numer and names of possible entries
+            // so creating hash map should not be necessary (see StaticStringMap)
+            var values = std.StringArrayHashMap(std.ArrayListUnmanaged(u8)).init(self.allocator);
+            defer {
+                var iter = values.iterator();
+                while (iter.next()) |entry| {
+                    self.allocator.free(entry.key_ptr.*);
+                    entry.value_ptr.*.deinit(self.allocator);
+                }
+                values.deinit();
+            }
+
             while (try next(reader, &line_buffer)) |record| {
                 switch (record) {
                     .section => |heading| {
@@ -102,37 +114,59 @@ pub fn ConfigManager(comptime ConfigType: type) type {
                         std.debug.print("[{s}]\n", .{heading});
                     },
                     .property => |kv| {
-                        std.debug.print("{s} = {s}\n", .{ kv.key, kv.value });
-                        inline for (config_fields) |field| {
-                            if (std.mem.eql(u8, field.name, kv.key)) {
-                                switch (@typeInfo(field.type)) {
-                                    .Bool => {
-                                        @field(data, field.name) = try parseBool(kv.value);
-                                    },
-                                    .Int => {
-                                        @field(data, field.name) = try std.fmt.parseInt(field.type, kv.value, 0);
-                                    },
-                                    .Float => {
-                                        @field(data, field.name) = try std.fmt.parseFloat(field.type, kv.value);
-                                    },
-                                    .Pointer => {
-                                        if (std.meta.sentinel(field.type)) |sentinel| {
-                                            const new_buf = try self.allocator.allocSentinel(u8, kv.value.len, sentinel);
-                                            @memcpy(new_buf, kv.value);
-                                            @field(data, field.name) = new_buf;
-                                        } else {
-                                            @field(data, field.name) = try self.allocator.dupe(u8, kv.value);
-                                        }
-                                    },
-                                    else => |t| {
-                                        std.debug.print("other value types not handled yet, got {}\n", .{t});
-                                        return error.UnsupportedConfigFieldType;
-                                    },
-                                }
-                            }
+                        if (!values.contains(kv.key)) {
+                            std.debug.print("{s} = {s}\n", .{ kv.key, kv.value });
+                            const map_key = try self.allocator.dupe(u8, kv.key);
+                            const value_buffer = try self.allocator.alloc(u8, 4096);
+                            var map_value = std.ArrayListUnmanaged(u8).initBuffer(value_buffer);
+                            map_value.appendSliceAssumeCapacity(kv.value);
+
+                            try values.put(map_key, map_value);
+                        } else {
+                            std.debug.print("Found duplicate of {s}, ignoring\n", .{ kv.key });
                         }
                     },
-                    .enumeration => |value| std.debug.print("{s}\n", .{value}),
+                    .enumeration => |value| {
+                        var last_entry = values.pop();
+                        last_entry.value.appendSliceAssumeCapacity(value);
+                        try values.put(last_entry.key, last_entry.value);
+                    },
+                }
+            }
+
+            var iter = values.iterator();
+            while (iter.next()) |entry| {
+                const key = entry.key_ptr.*;
+                const value = entry.value_ptr.*.items;
+                std.debug.print("{s}: {s}\n", .{key, value});
+
+                inline for (config_fields) |field| {
+                    if (std.mem.eql(u8, field.name, key)) {
+                        switch (@typeInfo(field.type)) {
+                            .Bool => {
+                                @field(data, field.name) = try parseBool(value);
+                            },
+                            .Int => {
+                                @field(data, field.name) = try std.fmt.parseInt(field.type, value, 0);
+                            },
+                            .Float => {
+                                @field(data, field.name) = try std.fmt.parseFloat(field.type, value);
+                            },
+                            .Pointer => {
+                                if (std.meta.sentinel(field.type)) |sentinel| {
+                                    const new_buf = try self.allocator.allocSentinel(u8, value.len, sentinel);
+                                    @memcpy(new_buf, value);
+                                    @field(data, field.name) = new_buf;
+                                } else {
+                                    @field(data, field.name) = try self.allocator.dupe(u8, value);
+                                }
+                            },
+                            else => |t| {
+                                std.debug.print("other value types not handled yet, got {}\n", .{t});
+                                return error.UnsupportedConfigFieldType;
+                            },
+                        }
+                    }
                 }
             }
         }
@@ -310,3 +344,33 @@ test "config load and change" {
         try testing.expectEqualDeep(case.expected2, app_config.data);
     }
 }
+
+test "config multiline value" {
+    const TestConfigData = struct {
+        multiline_field: []const u8 = "default value",
+        numeric_field: i32 = -1,
+    };
+
+    const allocator = std.testing.allocator;
+    const data =
+        \\multiline_field = 0 0,  64 0,  128 0,
+        \\                  0 64, 96 64, 160 64,
+        \\numeric_field = 10
+        ;
+    const expected = TestConfigData{
+        .multiline_field = "0 0,  64 0,  128 0,0 64, 96 64, 160 64,",
+        .numeric_field = 10
+    };
+
+    var stream = std.io.fixedBufferStream(data);
+    const reader = stream.reader();
+
+    var app_config = configManager(TestConfigData, allocator);
+    defer app_config.deinit();
+
+    _ = try app_config.load(reader.any());
+    try testing.expectEqualDeep(expected, app_config.data);
+
+    std.debug.print("{s}\n", .{app_config.data.multiline_field});
+}
+
