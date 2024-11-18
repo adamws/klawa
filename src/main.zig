@@ -48,22 +48,29 @@ pub const Theme = enum {
     default,
     kle,
     vortex_pok3r,
+    custom, // special theme which uses user provided image as atlas
 
     const keycaps_default_data = @embedFile("resources/keycaps_default_atlas.png");
     const keycaps_kle_data = @embedFile("resources/keycaps_kle_with_gaps_atlas.png");
     const keycaps_vortex_pok3r_data = @embedFile("resources/keycaps_vortex_pok3r_atlas.png");
 
-    pub fn getData(self: Theme) []const u8 {
+    pub fn getData(self: Theme) ?[]const u8 {
         return switch (self) {
             .default => keycaps_default_data,
             .kle => keycaps_kle_data,
             .vortex_pok3r => keycaps_vortex_pok3r_data,
+            .custom => null,
         };
     }
 
     pub fn fromString(value: []const u8) ?Theme {
         return std.meta.stringToEnum(Theme, value);
     }
+};
+
+pub const ThemeAtlasMapping = enum {
+    by_sizes,
+    with_coordinates, // not supported yet
 };
 
 const ConfigData = struct {
@@ -79,6 +86,7 @@ const ConfigData = struct {
     layout_preset: []const u8 = "tkl_ansi",
     layout_path: []const u8 = "", // absolute or realative to config file
     theme: []const u8 = "default",
+    theme_custom_atlas_path: []const u8 = "",
     show_typing: bool = true,
     key_tint_color: u32 = 0xff0000ff, // alpha=1
     key_scale: f32 = 1.0,
@@ -359,13 +367,19 @@ test "bounding box" {
     }
 }
 
-fn loadTexture(theme: Theme) rl.Texture {
-    const keycaps = theme.getData();
-    const keycaps_image = rl.loadImageFromMemory(".png", keycaps);
+fn loadTexture(theme: Theme, atlas_path: [*:0]const u8) rl.Texture {
+    const keycaps_image = blk: {
+        if (theme.getData()) |keycaps| {
+            break :blk rl.loadImageFromMemory(".png", keycaps);
+        } else {
+            break :blk rl.loadImage(atlas_path);
+        }
+    };
     const keycap_texture = rl.loadTextureFromImage(keycaps_image);
     rl.setTextureFilter(keycap_texture, rl.TextureFilter.texture_filter_bilinear);
     // texture created, image no longer needed
     rl.unloadImage(keycaps_image);
+
     return keycap_texture;
 }
 
@@ -538,7 +552,9 @@ pub fn main() !void {
 
     var keycap_texture = blk: {
         const theme = Theme.fromString(app_config.data.theme) orelse unreachable;
-        break :blk loadTexture(theme);
+        const atlas_path = try allocator.dupeZ(u8, app_config.data.theme_custom_atlas_path);
+        defer allocator.free(atlas_path);
+        break :blk loadTexture(theme, atlas_path);
     };
     defer rl.unloadTexture(keycap_texture);
 
@@ -625,12 +641,14 @@ pub fn main() !void {
                         else => unreachable,
                     }
                 },
-                .theme => {
+                .theme, .theme_custom_atlas_path => {
                     std.debug.print("Reload theme to '{s}'\n", .{app_config.data.theme});
                     if (Theme.fromString(app_config.data.theme)) |new_theme| {
                         keycap_texture = blk: {
                             rl.unloadTexture(keycap_texture);
-                            break :blk loadTexture(new_theme);
+                            const atlas_path = try allocator.dupeZ(u8, app_config.data.theme_custom_atlas_path);
+                            defer allocator.free(atlas_path);
+                            break :blk loadTexture(new_theme, atlas_path);
                         };
                     } else {
                         std.debug.print("Got unrecognized theme: '{s}', reload aborted\n", .{app_config.data.theme});
