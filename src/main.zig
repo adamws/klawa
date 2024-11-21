@@ -70,7 +70,7 @@ pub const Theme = enum {
 
 pub const ThemeAtlasMapping = enum {
     by_sizes,
-    with_coordinates, // not supported yet
+    by_mapping, // not supported yet
 };
 
 const ConfigData = struct {
@@ -87,6 +87,7 @@ const ConfigData = struct {
     layout_path: []const u8 = "", // absolute or realative to config file
     theme: []const u8 = "default",
     theme_custom_atlas_path: []const u8 = "",
+    theme_custom_atlas_map: []const u8 = "",
     show_typing: bool = true,
     key_tint_color: u32 = 0xff0000ff, // alpha=1
     key_scale: f32 = 1.0,
@@ -177,7 +178,7 @@ pub const AppState = struct {
     const Queue = SpscQueue(32, KeyData);
     const KEY_1U_PX = 64;
 
-    pub fn init(allocator: std.mem.Allocator, parsed: std.json.Parsed(kle.Keyboard), scale: f32) !AppState {
+    pub fn init(allocator: std.mem.Allocator, parsed: std.json.Parsed(kle.Keyboard), config_data: *ConfigData) !AppState {
         var self: AppState = .{
             .allocator = allocator,
             .parsed = parsed,
@@ -186,15 +187,15 @@ pub const AppState = struct {
             .keycode_keyboard_lookup = .{-1} ** 256,
             .window_width = -1,
             .window_height = -1,
-            .scale = scale,
+            .scale = config_data.key_scale,
         };
         calcualteWindoWize(&self);
-        initKeys(&self);
+        initKeys(&self, config_data.theme_custom_atlas_map);
         try calculateKeyLookup(&self);
         return self;
     }
 
-    fn initKeys(self: *AppState) void {
+    fn initKeys(self: *AppState, atlas_map: []const u8) void {
         for (self.keyboard.keys, 0..) |k, index| {
             var s = &self.key_states[index];
 
@@ -235,6 +236,33 @@ pub const AppState = struct {
             }
 
             s.pressed = false;
+        }
+
+        if (atlas_map.len != 0)
+        {
+            // not pretty:
+            var iter = std.mem.split(u8, atlas_map, ",");
+            var i: usize = 0;
+            while (iter.next()) |map| {
+                if (i >= self.key_states.len) break;
+                const s = &self.key_states[i];
+
+                var position: [2]usize = undefined;
+                var number_iter = std.mem.split(u8, map, " ");
+                var number_index: usize = 0;
+                while (number_iter.next()) |number| {
+                    if (number.len != 0) {
+                        position[number_index] = std.fmt.parseInt(usize, number, 0) catch unreachable;
+                        number_index += 1;
+                    }
+                    if (number_index >= position.len) break;
+                }
+
+                s.src.x = @floatFromInt(position[0]);
+                s.src.y = @floatFromInt(position[1]);
+
+                i += 1;
+            }
         }
     }
 
@@ -316,7 +344,7 @@ pub const AppState = struct {
     }
 };
 
-fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: []const u8, layout: Layout, scale: f32) !AppState {
+fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: []const u8, layout: Layout, config_data: *ConfigData) !AppState {
     const kle_str: []const u8 = blk: {
         if (layout_path.len != 0) {
             std.debug.print("layout = {s}\n", .{layout_path});
@@ -331,7 +359,7 @@ fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: 
     defer allocator.free(kle_str);
 
     const keyboard = try kle.parseFromSlice(allocator, kle_str);
-    return AppState.init(allocator, keyboard, scale);
+    return AppState.init(allocator, keyboard, config_data);
 }
 
 test "bounding box" {
@@ -359,7 +387,8 @@ test "bounding box" {
     for (cases) |case| {
         const parsed = try kle.parseFromSlice(allocator, case.layout);
 
-        var s = try AppState.init(allocator, parsed, 1.0);
+        var default_config: ConfigData = .{};
+        var s = try AppState.init(allocator, parsed, &default_config);
         defer s.deinit();
 
         try std.testing.expect(s.window_width == case.expected.w);
@@ -410,11 +439,12 @@ pub fn main() !void {
     const cwd = fs.cwd();
 
     const params = comptime clap.parseParamsComptime(
-        \\    --record <str>     Record events to file.
-        \\    --replay <str>     Replay events from file.
-        \\    --replay-loop      Loop replay action. When not set app will exit after replay ends.
-        \\    --render <str>     Render frames to video file. Works only with replay without loop.
-        \\-h, --help             Display this help and exit.
+        \\    --record <str>       Record events to file.
+        \\    --replay <str>       Replay events from file.
+        \\    --replay-loop        Loop replay action. When not set app will exit after replay ends.
+        \\    --render <str>       Render frames to video file. Works only with replay without loop.
+        \\    --save-atlas <str>   Saves current keyboard to atlas file in current working directory.
+        \\-h, --help               Display this help and exit.
         \\
     );
 
@@ -498,8 +528,7 @@ pub fn main() !void {
 
     app_state = blk: {
         const layout_path = app_config.data.layout_path;
-        const scale = app_config.data.key_scale;
-        break :blk try getState(allocator, config_dir, layout_path, layout, scale);
+        break :blk try getState(allocator, config_dir, layout_path, layout, &app_config.data);
     };
     defer app_state.deinit();
 
@@ -557,6 +586,32 @@ pub fn main() !void {
         break :blk loadTexture(theme, atlas_path);
     };
     defer rl.unloadTexture(keycap_texture);
+
+    if (res.args.@"save-atlas") |atlas_file| {
+        const target = rl.loadRenderTexture(app_state.window_width, app_state.window_height);
+        defer rl.unloadRenderTexture(target);
+
+        rl.beginTextureMode(target);
+
+        const rot = rl.Vector2{ .x = 0, .y = 0 };
+        std.debug.print("This is mapping for currently generated atlas, copy this to config\n", .{});
+        for (app_state.key_states) |k| {
+            rl.drawTexturePro(keycap_texture, k.src, k.dst, rot, k.angle, rl.Color.white);
+            std.debug.print("{d: >5} {d: >5},\n", .{k.dst.x, k.dst.y});
+        }
+
+        rl.endTextureMode();
+
+        var image = rl.loadImageFromTexture(target.texture);
+        defer rl.unloadImage(image);
+
+        rl.imageFlipVertical(&image);
+
+        const atlas_file_z = try allocator.dupeZ(u8, atlas_file);
+        defer allocator.free(atlas_file_z);
+        _ = rl.exportImage(image, atlas_file_z);
+        return;
+    }
 
     // TODO: implement font discovery
     // TODO: if not found fallback to default
@@ -622,14 +677,13 @@ pub fn main() !void {
                 },
                 .layout_path, .layout_preset, .key_scale => {
                     const layout_path = app_config.data.layout_path;
-                    const scale = app_config.data.key_scale;
                     layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
                     if (layout_path.len != 0) {
                         std.debug.print("Reload layout using file '{s}'\n", .{layout_path});
                     } else {
                         std.debug.print("Reload layout using preset '{s}'\n", .{@tagName(layout)});
                     }
-                    if (getState(allocator, config_dir, app_config.data.layout_path, layout, scale)) |new_state| {
+                    if (getState(allocator, config_dir, app_config.data.layout_path, layout, &app_config.data)) |new_state| {
                         app_state.deinit();
                         app_state = new_state;
                         rl.setWindowSize(app_state.window_width, app_state.window_height);

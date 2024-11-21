@@ -1,4 +1,5 @@
 event_file := "events.bin"
+atlas_file := "klawa_atlas.png"
 tracy_path := "/home/aws/git/tracy"
 
 run:
@@ -31,6 +32,10 @@ run-replay-render:
 run-replay-render-tracy:
   rm -rf frames.raw
   zig build run -Dtracy={{tracy_path}} -Dtracy-allocation -Dtracy-callstack -- --replay {{event_file}} --render output.webm
+
+run-save-as-atlas:
+  rm -f {{atlas_file}}
+  zig build run -- --save-atlas {{atlas_file}}
 
 test-kle:
   zig test src/kle.zig
