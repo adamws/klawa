@@ -54,7 +54,7 @@ pytest:
   cd tests && . .env/bin/activate && python -m pytest src/
 
 run-atlas-generator:
-  cd tools/atlas-generator && zig build run -- --keycap ../../src/resources/keycaps_default.png --output ../../src/resources/keycaps_default_atlas.png
-  cd tools/atlas-generator && zig build run -- --keycap ../../src/resources/keycaps_kle.png --output ../../src/resources/keycaps_kle_atlas.png
-  cd tools/atlas-generator && zig build run -- --keycap ../../src/resources/keycaps_kle_with_gaps.png --output ../../src/resources/keycaps_kle_with_gaps_atlas.png
-  cd tools/atlas-generator && zig build run -- --keycap ../../src/resources/keycaps_vortex_pok3r.png --output ../../src/resources/keycaps_vortex_pok3r_atlas.png
+  zig build run -- --keycap ./src/resources/keycaps_default.png --output ./src/resources/keycaps_default_atlas.png
+  zig build run -- --keycap ./src/resources/keycaps_kle.png --output ./src/resources/keycaps_kle_atlas.png
+  zig build run -- --keycap ./src/resources/keycaps_kle_with_gaps.png --output ./src/resources/keycaps_kle_with_gaps_atlas.png
+  zig build run -- --keycap ./src/resources/keycaps_vortex_pok3r.png --output ./src/resources/keycaps_vortex_pok3r_atlas.png

@@ -11,6 +11,7 @@ const builtin = @import("builtin");
 const config = @import("config.zig");
 const kle = @import("kle.zig");
 const math = @import("math.zig");
+const textures = @import("textures.zig");
 const tracy = @import("tracy.zig");
 
 const backend = switch (builtin.target.os.tag) {
@@ -444,6 +445,8 @@ pub fn main() !void {
         \\    --replay-loop        Loop replay action. When not set app will exit after replay ends.
         \\    --render <str>       Render frames to video file. Works only with replay without loop.
         \\    --save-atlas <str>   Saves current keyboard to atlas file in current working directory.
+        \\    --keycap <str>       Path to keycap theme. (temporary for development)
+        \\    --output <str>       Path to result atlas file. (temporary for development)
         \\-h, --help               Display this help and exit.
         \\
     );
@@ -463,6 +466,19 @@ pub fn main() !void {
         // just checking if it exist
         const f = try cwd.openFile(replay_file, .{});
         f.close();
+    }
+
+    // check if updating builtin texture atlases
+
+    if (res.args.keycap) |keycap_file| {
+        const keycap_file_path = try allocator.dupeZ(u8, keycap_file);
+        defer allocator.free(keycap_file_path);
+
+        const output_file_path = try allocator.dupeZ(u8, res.args.output.?);
+        defer allocator.free(output_file_path);
+
+        try textures.generate_texture_atlas(keycap_file_path, output_file_path);
+        return;
     }
 
     // config handling

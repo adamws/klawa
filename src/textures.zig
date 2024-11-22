@@ -223,41 +223,8 @@ fn stitchVertically(
     rl.imageDraw(result_image, source_image, regions.bottom.rect, dst.rect, rl.Color.white);
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const params = comptime clap.parseParamsComptime(
-        \\    --keycap <str>     Path to keycap theme.
-        \\    --output <str>     Path to result atlas file.
-        \\-h, --help             Display this help and exit.
-        \\
-    );
-
-    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{ .allocator = allocator });
-    defer res.deinit();
-
-    if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{
-            .spacing_between_parameters = 0,
-        });
-    }
-
-    const keycap_file_path = if (res.args.keycap) |val| blk: {
-        break :blk try allocator.dupeZ(u8, val);
-    } else {
-        return error.MissingArgument;
-    };
-    defer allocator.free(keycap_file_path);
-    const output_file_path = if (res.args.output) |val| blk: {
-        break :blk try allocator.dupeZ(u8, val);
-    } else {
-        return error.MissingArgument;
-    };
-    defer allocator.free(output_file_path);
-
-    const keycap_image = rl.loadImage(keycap_file_path);
+pub fn generate_texture_atlas(keycap_file: [:0]const u8, output_file: [:0]const u8) !void {
+    const keycap_image = rl.loadImage(keycap_file);
     defer rl.unloadImage(keycap_image);
 
     if (keycap_image.width != @as(c_int, @intFromFloat(Constants.keycap_1u_size * 2.5)) and
@@ -284,6 +251,6 @@ pub fn main() !void {
         rl.imageDraw(&result_image, keycap_image, src.rect, dst.rect, rl.Color.white);
     }
 
-    _ = rl.exportImage(result_image, output_file_path);
-    std.debug.print("Exit\n", .{});
+    _ = rl.exportImage(result_image, output_file);
+    std.debug.print("Texture atlas generated\n", .{});
 }
