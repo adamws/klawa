@@ -9,47 +9,39 @@ pub const AtlasError = error{
 
 // all dimensions in pixels
 
-const Constants = struct {
-    const keycap_1u_size: f32 = 64;
-    const step_size: f32 = 16;
-};
-
-const KeySize = struct {
-    width: f32,
-    height: f32,
-};
+const keycap_1u_size: f32 = 64;
+const step_size: f32 = 16;
 
 const StitchDirection = enum {
     horizontal,
     vertical,
 
-    fn determine(key_size: KeySize) StitchDirection {
-        return if (key_size.height == Constants.keycap_1u_size) .horizontal else .vertical;
+    fn determine(key_size: rl.Vector2) StitchDirection {
+        return if (key_size.y == keycap_1u_size) .horizontal else .vertical;
     }
 };
 
-const keycap_sizes = getSizes(.horizontal, 1, 7) ++               // widths
-                     getSizes(.vertical, 1, 2) ++                 // heights
-                     [_]KeySize{.{ .width = 96, .height = 128 }}; // iso enter
+const keycap_sizes = getSizes(.horizontal, 1, 7) ++         // widths
+                     getSizes(.vertical, 1, 2) ++           // heights
+                     [_]rl.Vector2{.{ .x = 96, .y = 128 }}; // iso enter
 
-
-fn getSizes(comptime direction: StitchDirection, comptime min: usize, comptime max: usize) [(max - min) * 4 + 1]KeySize {
-    var result: [(max - min) * 4 + 1]KeySize = undefined;
-    var current: f32 = min * Constants.keycap_1u_size;
-    const max_dimension: f32 = max * Constants.keycap_1u_size;
+fn getSizes(comptime direction: StitchDirection, comptime min: usize, comptime max: usize) [(max - min) * 4 + 1]rl.Vector2 {
+    var result: [(max - min) * 4 + 1]rl.Vector2 = undefined;
+    var current: f32 = min * keycap_1u_size;
+    const max_dimension: f32 = max * keycap_1u_size;
     var i: usize = 0;
     while (current <= max_dimension) : (i += 1) {
         switch (direction) {
             .horizontal => {
-                result[i].width = current;
-                result[i].height = 1 * Constants.keycap_1u_size;
+                result[i].x = current;
+                result[i].y = 1 * keycap_1u_size;
             },
             .vertical => {
-                result[i].width = 1 * Constants.keycap_1u_size;
-                result[i].height = current;
+                result[i].x = 1 * keycap_1u_size;
+                result[i].y = current;
             }
         }
-        current += Constants.step_size;
+        current += step_size;
     }
     return result;
 }
@@ -57,38 +49,43 @@ fn getSizes(comptime direction: StitchDirection, comptime min: usize, comptime m
 const atlas_width: f32 = sumWidths(&keycap_sizes);
 const atlas_height: f32 = maxHeight(&keycap_sizes);
 
-fn sumWidths(sizes: []const KeySize) f32 {
+fn sumWidths(sizes: []const rl.Vector2) f32 {
     var result: f32 = 0;
-    for (sizes) |x| {
-        result += x.width;
+    for (sizes) |size| {
+        result += size.x;
     }
     return result;
 }
 
-fn maxHeight(sizes: []const KeySize) f32 {
+fn maxHeight(sizes: []const rl.Vector2) f32 {
     var result: f32 = 0;
-    for (sizes) |x| {
-        if (x.height > result) result = x.height;
+    for (sizes) |size| {
+        if (size.y > result) result = size.y;
     }
     return result;
 }
 
 const atlas_positions = getPositions(&keycap_sizes);
 
-const Coordinates = struct {
-    x: f32,
-    y: f32,
-};
-
-fn getPositions(sizes: []const KeySize) [keycap_sizes.len]Coordinates {
-    var coordinates: [keycap_sizes.len]Coordinates = undefined;
+fn getPositions(sizes: []const rl.Vector2) [keycap_sizes.len]rl.Vector2 {
+    var coordinates: [keycap_sizes.len]rl.Vector2 = undefined;
     var current_x: f32 = 0;
-    for (sizes, 0..) |x, i| {
+    for (sizes, 0..) |size, i| {
         coordinates[i].x = current_x;
         coordinates[i].y = 0; // for default texture atlases we place images side by side
-        current_x += x.width;
+        current_x += size.x;
     }
     return coordinates;
+}
+
+pub fn getPositionBySize(size: rl.Vector2) rl.Vector2 {
+    std.debug.print("Looking for {d} {d}\n", .{size.x, size.y});
+    for (keycap_sizes, 0..) |s, i| {
+        if (size.x == s.x and size.y == s.y) {
+            return atlas_positions[i];
+        }
+    }
+    return .{.x = 0 , .y = 0};
 }
 
 const ImageRegion = struct {
@@ -144,25 +141,25 @@ const BaseKeycapRegions = struct {
 fn generateStandardKey(
     result_image: *rl.Image,
     source_image: rl.Image,
-    size: KeySize,
-    map_position: Coordinates,
+    size: rl.Vector2,
+    map_position: rl.Vector2,
     regions: BaseKeycapRegions,
 ) !void {
-    std.debug.assert(!(size.width == 1 or size.height == 1));
+    std.debug.assert(!(size.x == 1 or size.y == 1));
     const stitch_direction = StitchDirection.determine(size);
 
     switch (stitch_direction) {
         .horizontal => try stitchHorizontally(
             result_image,
             source_image,
-            size.width,
+            size.x,
             map_position,
             regions,
         ),
         .vertical => try stitchVertically(
             result_image,
             source_image,
-            size.height,
+            size.y,
             map_position,
             regions,
         ),
@@ -173,7 +170,7 @@ fn stitchHorizontally(
     result_image: *rl.Image,
     source_image: rl.Image,
     target_width: f32,
-    map_position: Coordinates,
+    map_position: rl.Vector2,
     regions: BaseKeycapRegions,
 ) !void {
     var dst = regions.left.withPosition(map_position.x, map_position.y);
@@ -200,7 +197,7 @@ fn stitchVertically(
     result_image: *rl.Image,
     source_image: rl.Image,
     target_height: f32,
-    map_position: Coordinates,
+    map_position: rl.Vector2,
     regions: BaseKeycapRegions,
 ) !void {
     var dst = regions.top.withPosition(map_position.x, map_position.y);
@@ -227,13 +224,13 @@ pub fn generate_texture_atlas(keycap_file: [:0]const u8, output_file: [:0]const 
     const keycap_image = rl.loadImage(keycap_file);
     defer rl.unloadImage(keycap_image);
 
-    if (keycap_image.width != @as(c_int, @intFromFloat(Constants.keycap_1u_size * 2.5)) and
-        keycap_image.height != @as(c_int, @intFromFloat(Constants.keycap_1u_size * 2)))
+    if (keycap_image.width != @as(c_int, @intFromFloat(keycap_1u_size * 2.5)) and
+        keycap_image.height != @as(c_int, @intFromFloat(keycap_1u_size * 2)))
     {
         return AtlasError.InvalidImageDimensions;
     }
 
-    const regions = BaseKeycapRegions.init(Constants.keycap_1u_size, Constants.keycap_1u_size);
+    const regions = BaseKeycapRegions.init(keycap_1u_size, keycap_1u_size);
 
     var result_image = rl.genImageColor(atlas_width, atlas_height, rl.Color.blank);
 
@@ -241,7 +238,7 @@ pub fn generate_texture_atlas(keycap_file: [:0]const u8, output_file: [:0]const 
     for (keycap_sizes[0..keycap_sizes.len - 1], atlas_positions[0..atlas_positions.len - 1]) |size, map_position| {
         std.debug.print("size {any}\n", .{size});
         try generateStandardKey(&result_image, keycap_image, size, map_position, regions);
-        current_x_pos += @intFromFloat(size.width);
+        current_x_pos += @intFromFloat(size.x);
     }
 
     // iso enter handled separately

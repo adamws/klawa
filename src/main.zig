@@ -191,80 +191,88 @@ pub const AppState = struct {
             .scale = config_data.key_scale,
         };
         calcualteWindoWize(&self);
-        initKeys(&self, config_data.theme_custom_atlas_map);
+        try initKeys(&self, config_data.theme_custom_atlas_map);
         try calculateKeyLookup(&self);
         return self;
     }
 
-    fn initKeys(self: *AppState, atlas_map: []const u8) void {
+    fn initKeys(self: *AppState, atlas_map: []const u8) !void {
+        const atlas_map_parsed = try convertAtlasMap(self, atlas_map) orelse &[0]rl.Vector2{};
+        defer self.allocator.free(atlas_map_parsed);
+
         for (self.keyboard.keys, 0..) |k, index| {
             var s = &self.key_states[index];
+            s.pressed = false;
 
-            const angle_rad = std.math.rad_per_deg * k.rotation_angle;
-            const point = math.Vec2{ .x = k.x, .y = k.y };
-            const rot_origin = math.Vec2{ .x = k.rotation_x, .y = k.rotation_y };
-            const result = math.rotate_around_center(point, rot_origin, angle_rad);
-
-            const width: f32 = @floatCast(KEY_1U_PX * @max(k.width, k.width2));
-            const height: f32 = @floatCast(KEY_1U_PX * @max(k.height, k.height2));
-
-            s.src = rl.Rectangle{
-                .x = 0,
-                .y = @floatCast(KEY_1U_PX * (k.width * 4 - 4)),
-                .width = width,
-                .height = height,
-            };
-            s.dst = rl.Rectangle{
-                .x = @as(f32, @floatCast(KEY_1U_PX * result.x)) * self.scale,
-                .y = @as(f32, @floatCast(KEY_1U_PX * result.y)) * self.scale,
-                .width = width * self.scale,
-                .height = height * self.scale,
-            };
+            s.dst = getKeyDestination(self.*, &k);
             s.angle = @floatCast(k.rotation_angle);
 
-            // special case: iso enter
-            // TODO: calculate, not hardcode
-            if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
-                s.src.x = 0;
-                s.src.y = 1824;
-                s.dst.x -= 0.25 * KEY_1U_PX * self.scale;
-            } else if (k.width == 1.0 and k.height == 2.0) {
-                s.src.x = 0;
-                s.src.y = 1824 - 128;
-            } else if (k.width == 1.0 and k.height == 1.5) {
-                s.src.x = 0;
-                s.src.y = 1824 - 128 - 64 - 32;
-            }
-
-            s.pressed = false;
-        }
-
-        if (atlas_map.len != 0)
-        {
-            // not pretty:
-            var iter = std.mem.split(u8, atlas_map, ",");
-            var i: usize = 0;
-            while (iter.next()) |map| {
-                if (i >= self.key_states.len) break;
-                const s = &self.key_states[i];
-
-                var position: [2]usize = undefined;
-                var number_iter = std.mem.split(u8, map, " ");
-                var number_index: usize = 0;
-                while (number_iter.next()) |number| {
-                    if (number.len != 0) {
-                        position[number_index] = std.fmt.parseInt(usize, number, 0) catch unreachable;
-                        number_index += 1;
-                    }
-                    if (number_index >= position.len) break;
-                }
-
-                s.src.x = @floatFromInt(position[0]);
-                s.src.y = @floatFromInt(position[1]);
-
-                i += 1;
+            if (atlas_map.len != 0) {
+                s.src.x = atlas_map_parsed[index].x;
+                s.src.y = atlas_map_parsed[index].y;
+                s.src.width = s.dst.width;
+                s.src.height = s.dst.height;
+            } else {
+                s.src = getKeySource(rl.Vector2{.x = s.dst.width, .y = s.dst.height});
             }
         }
+    }
+
+    fn getKeyDestination(self: AppState, k: *const kle.Key) rl.Rectangle {
+        const angle_rad = std.math.rad_per_deg * k.rotation_angle;
+        const point = math.Vec2{ .x = k.x, .y = k.y };
+        const rot_origin = math.Vec2{ .x = k.rotation_x, .y = k.rotation_y };
+        const result = math.rotate_around_center(point, rot_origin, angle_rad);
+
+        const width: f32 = @floatCast(KEY_1U_PX * @max(k.width, k.width2));
+        const height: f32 = @floatCast(KEY_1U_PX * @max(k.height, k.height2));
+
+        // iso enter, might not work when rotated. For now only non-rectangular supported key
+        var x_offset: f32 = 0;
+        if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
+            x_offset = -0.25 * KEY_1U_PX * self.scale;
+        }
+
+        return .{
+            .x = @as(f32, @floatCast(KEY_1U_PX * result.x)) * self.scale + x_offset,
+            .y = @as(f32, @floatCast(KEY_1U_PX * result.y)) * self.scale,
+            .width = width * self.scale,
+            .height = height * self.scale,
+        };
+    }
+
+    fn getKeySource(size: rl.Vector2) rl.Rectangle {
+        const position = textures.getPositionBySize(size);
+        return .{
+            .x = position.x,
+            .y = position.y,
+            .width = size.x,
+            .height = size.y,
+        };
+    }
+
+    fn convertAtlasMap(self: *AppState, atlas_map: []const u8) !?[]rl.Vector2 {
+        if (atlas_map.len == 0) return null;
+        var result = try self.allocator.alloc(rl.Vector2, atlas_map.len);
+        var iter = std.mem.split(u8, atlas_map, ",");
+        var i: usize = 0;
+        while (iter.next()) |map| {
+            std.debug.print("{} {s}\n", .{i, map});
+
+            var number_parsed: [2]usize = undefined;
+            var number_iter = std.mem.split(u8, map, " ");
+            var j: usize = 0;
+            while (number_iter.next()) |number| {
+                if (number.len == 0) continue;
+                number_parsed[j] = try std.fmt.parseInt(usize, number, 0);
+                j += 1;
+            }
+
+            result[i].x = @floatFromInt(number_parsed[0]);
+            result[i].y = @floatFromInt(number_parsed[1]);
+            i += 1;
+        }
+        return result;
     }
 
     fn calculateKeyLookup(self: *AppState) !void {
