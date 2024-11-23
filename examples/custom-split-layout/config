@@ -1,0 +1,20 @@
+
+#
+# window settings
+#
+
+window_undecorated = true
+window_transparency = true
+background_color = 0x00000000 ; transparent
+
+#
+# appearance
+#
+
+show_typing = true
+typing_font_size = 120
+
+typing_font_color = 0xd81e5bff
+layout_path = ./atreus.json
+theme = kle
+key_tint_color = 0xf0544fff

@@ -15,7 +15,6 @@ typing_font_size = 90
 
 typing_font_color = 0xffffffff ; white
 
-layout_preset = 60_iso
 layout_path = ./my_pok3r_layout.json
 
 theme = vortex_pok3r

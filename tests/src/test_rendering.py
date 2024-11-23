@@ -162,6 +162,7 @@ def __get_parameters():
         "adamws-config",
         "custom-keycap-asset",
         "customized-pok3r-theme",
+        "custom-split-layout",
     ]
     test_params = []
     # not interested in all combinations
@@ -171,6 +172,7 @@ def __get_parameters():
     test_params.append(pytest.param(texts[0], examples[1]))
     test_params.append(pytest.param(texts[0], examples[2]))
     test_params.append(pytest.param(texts[0], examples[3]))
+    test_params.append(pytest.param(texts[1], examples[4]))
 
     return test_params
 
