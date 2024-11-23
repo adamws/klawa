@@ -1,5 +1,6 @@
 import logging
 import os
+from os.path import isfile
 import signal
 import shutil
 import subprocess
@@ -106,25 +107,25 @@ def screen_manager():
         dummy.kill()
 
 
-def create_config(tmpdir, args) -> None:
-    with open(f"{tmpdir}/config", "w") as f:
-        for key, value in args.items():
-            f.write(f"{key} = {value}\n")
+def log_config(tmpdir) -> None:
     with open(f"{tmpdir}/config", "r") as r:
         logger.debug(r.readlines())
 
 
 @pytest.fixture
-def app_isolation(tmpdir, app_path, data_dir):
+def app_isolation(tmpdir, app_path, examples_dir):
     @contextmanager
-    def _isolation(args):
+    def _isolation(example):
         new_path = shutil.copy(app_path, tmpdir)
         logger.info(f"New app path: {new_path}")
 
-        if args:
-            if "layout_path" in args:
-                shutil.copy(data_dir / args["layout_path"], tmpdir)
-            create_config(tmpdir, args)
+        if example:
+            src_dir = examples_dir / example
+            for item in os.listdir(src_dir):
+                src_file = src_dir / item
+                if os.path.isfile(src_file):
+                    shutil.copy(src_file, tmpdir)
+            log_config(tmpdir)
 
         yield new_path
 
@@ -156,29 +157,29 @@ def __get_parameters():
         "The quick brown fox jumps over the lazy dog",
         "Dość błazeństw, żrą mój pęk luźnych fig",
     ]
-    configs = [
-        {}, # default
-        {"layout_path": "atreus.json"},
-        {"theme": "vortex_pok3r", "show_typing": "false"},
-        {"theme": "vortex_pok3r", "typing_font_color": "0xffffffff"},
+    examples = [
+        "", # default
+        "adamws-config",
+        "custom-keycap-asset",
+        "customized-pok3r-theme",
     ]
     test_params = []
     # not interested in all combinations
 
-    test_params.append(pytest.param(texts[0], configs[0]))
-    test_params.append(pytest.param(texts[1], configs[0]))
-    test_params.append(pytest.param(texts[0], configs[1]))
-    test_params.append(pytest.param(texts[0], configs[2]))
-    test_params.append(pytest.param(texts[0], configs[3]))
+    test_params.append(pytest.param(texts[0], examples[0]))
+    test_params.append(pytest.param(texts[1], examples[0]))
+    test_params.append(pytest.param(texts[0], examples[1]))
+    test_params.append(pytest.param(texts[0], examples[2]))
+    test_params.append(pytest.param(texts[0], examples[3]))
 
     return test_params
 
 
 @pytest.mark.parametrize(
-    "text,config", __get_parameters()
+    "text,example", __get_parameters()
 )
-def test_record_and_render(app_isolation, text: str, config) -> None:
-    with app_isolation(config) as app:
+def test_record_and_render(app_isolation, text: str, example) -> None:
+    with app_isolation(example) as app:
         app_dir = Path(app).parent
         processes = {}
 

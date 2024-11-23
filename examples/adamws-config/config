@@ -3,17 +3,17 @@
 #
 
 window_undecorated = true
-window_transparency = true
-background_color = 0x00000000 ; transparent
+window_transparency = false
+background_color = 0x000000ff ; black
 
 #
 # appearance
 #
 
 show_typing = true
-typing_font_size = 120
+typing_font_size = 90
 
-typing_font_color = 0xffffffff
+typing_font_color = 0xffffffff ; white
 
 layout_preset = 60_iso
 layout_path = ./my_pok3r_layout.json

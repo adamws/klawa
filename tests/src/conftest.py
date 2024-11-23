@@ -26,11 +26,11 @@ def app_path(request) -> Path:
 
 
 @pytest.fixture
-def data_dir(request):
+def examples_dir(request):
     test_dir = Path(request.module.__file__).parent
-    data_dir = test_dir.parent / "data"
-    logger.info(f"Test data directory: {data_dir}")
-    return data_dir
+    examples_dir = test_dir.parent / "../examples"
+    logger.info(f"Test examples directory: {examples_dir}")
+    return examples_dir
 
 
 @pytest.hookimpl(hookwrapper=True)
