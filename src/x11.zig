@@ -168,17 +168,18 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
                     const device_event: *x11.XIDeviceEvent = @alignCast(@ptrCast(cookie.data));
                     // offset by 8 to map x11 codes to linux input event codes
                     // (defined in linux/input-event-codes.h system header):
-                    const keycode: usize = @intCast(device_event.detail - 8);
+                    const keycode: u8 = @intCast(device_event.detail - 8);
 
                     if (event_file) |file| {
                         const device_event_data: [*]u8 = @ptrCast(device_event);
                         _ = try file.writeAll(device_event_data[0..@sizeOf(x11.XIDeviceEvent)]);
                     }
 
-                    app_state.updateKeyStates(keycode, cookie.evtype == x11.XI_KeyPress);
+                    var key: KeyData = std.mem.zeroInit(KeyData, .{});
+                    key.keycode = keycode;
 
                     if (cookie.evtype == x11.XI_KeyPress) {
-                        var key: KeyData = std.mem.zeroInit(KeyData, .{});
+                        key.pressed = true;
                         _ = input_ctx.lookupString(device_event, &key);
 
                         if (key.string[0] != 0) {
@@ -186,14 +187,16 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
                             // this will not include modifiers
                             app_state.last_char_timestamp = std.time.timestamp();
                         }
-
-                        while (!app_state.keys.push(key)) : ({
-                            // this is unlikely scenario - normal typing would not be fast enough
-                            std.debug.print("Consumer outpaced, try again\n", .{});
-                            std.time.sleep(10 * std.time.ns_per_ms);
-                        }) {}
-                        std.debug.print("Produced: '{any}'\n", .{key});
+                    } else {
+                        key.pressed = false;
                     }
+
+                    while (!app_state.keys.push(key)) : ({
+                        // this is unlikely scenario - normal typing would not be fast enough
+                        std.debug.print("Consumer outpaced, try again\n", .{});
+                        std.time.sleep(10 * std.time.ns_per_ms);
+                    }) {}
+                    std.debug.print("Produced: '{any}'\n", .{key});
                 },
                 else => {},
             }

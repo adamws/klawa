@@ -40,12 +40,11 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
     if (nCode == c.HC_ACTION) {
         const keyboard: *const c.KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @intCast(lParam)));
 
-        app_state_l.updateKeyStates(keyboard.vkCode, wParam == c.WM_KEYDOWN or wParam == c.WM_SYSKEYDOWN);
+        var key: KeyData = std.mem.zeroInit(KeyData, .{});
+        key.keycode = @intCast(keyboard.vkCode);
 
         if (wParam == c.WM_KEYDOWN or wParam == c.WM_SYSKEYDOWN) {
-            var key: KeyData = std.mem.zeroInit(KeyData, .{});
-
-            key.keycode = @intCast(keyboard.vkCode);
+            key.pressed = true;
 
             app_state_l.last_char_timestamp = std.time.timestamp();
             keyEventToString(keyboard.vkCode, keyboard.scanCode, &key.string) catch {};
@@ -61,14 +60,16 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
             std.debug.print("Pressed vk: '{}', scancode: '{}' extended: {}, string: '{s}', symbol: '{s}'\n", .{
                 keyboard.vkCode, keyboard.scanCode, extended, std.mem.sliceTo(&key.string, 0), key.symbol
             });
-
-            while (!app_state_l.keys.push(key)) : ({
-                // this is unlikely scenario - normal typing would not be fast enough
-                std.debug.print("Consumer outpaced, try again\n", .{});
-                std.time.sleep(10 * std.time.ns_per_ms);
-            }) {}
-            std.debug.print("Produced: '{any}'\n", .{key});
+        } else {
+            key.pressed = false;
         }
+
+        while (!app_state_l.keys.push(key)) : ({
+            // this is unlikely scenario - normal typing would not be fast enough
+            std.debug.print("Consumer outpaced, try again\n", .{});
+            std.time.sleep(10 * std.time.ns_per_ms);
+        }) {}
+        std.debug.print("Produced: '{any}'\n", .{key});
     }
     return c.CallNextHookEx(hook.?, nCode, wParam, lParam);
 }

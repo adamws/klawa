@@ -752,6 +752,8 @@ pub fn main() !void {
         }
 
         if (app_state.keys.pop()) |k| {
+            app_state.updateKeyStates(@intCast(k.keycode), k.pressed);
+
             if (k.symbol == null) continue;
             std.debug.print("Consumed: '{s}'\n", .{k.symbol});
 
