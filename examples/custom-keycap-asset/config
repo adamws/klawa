@@ -1,0 +1,21 @@
+#
+# window settings
+#
+
+window_undecorated = true
+window_transparent = false
+background_color = 0x282828ff
+
+#
+# appearance
+#
+
+show_typing = false
+
+theme = custom_from_keycap
+# try also jumbo_dark.png, jumbo_light.png or jumbo_light_with_gap.png
+theme_custom_keycap_path = jumbo_dark_with_gap.png
+
+key_tint_color = 0xffffffff
+layout_preset = 60_iso
+draw_fps = false

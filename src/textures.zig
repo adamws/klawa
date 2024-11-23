@@ -220,7 +220,7 @@ fn stitchVertically(
     rl.imageDraw(result_image, source_image, regions.bottom.rect, dst.rect, rl.Color.white);
 }
 
-pub fn generate_texture_atlas(keycap_file: [:0]const u8, output_file: [:0]const u8) !void {
+pub fn generate_texture_atlas_image(keycap_file: [:0]const u8) !rl.Image {
     const keycap_image = rl.loadImage(keycap_file);
     defer rl.unloadImage(keycap_image);
 
@@ -248,6 +248,11 @@ pub fn generate_texture_atlas(keycap_file: [:0]const u8, output_file: [:0]const 
         rl.imageDraw(&result_image, keycap_image, src.rect, dst.rect, rl.Color.white);
     }
 
+    return result_image;
+}
+
+pub fn generate_texture_atlas(keycap_file: [:0]const u8, output_file: [:0]const u8) !void {
+    const result_image = try generate_texture_atlas_image(keycap_file);
     _ = rl.exportImage(result_image, output_file);
     std.debug.print("Texture atlas generated\n", .{});
 }
