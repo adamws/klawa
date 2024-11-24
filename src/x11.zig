@@ -78,7 +78,6 @@ const X11InputContext = struct {
             &key_data.keysym,
             &status,
         );
-        key_data.symbol = x11.XKeysymToString(key_data.keysym);
         return len;
     }
 };
@@ -207,6 +206,10 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
 
     _ = x11.XSync(display, 0);
     _ = x11.XCloseDisplay(display);
+}
+
+pub fn keysymToString(keysym: c_ulong) [*c]const u8 {
+    return x11.XKeysymToString(keysym);
 }
 
 // uses events stored in file to reproduce them

@@ -50,15 +50,14 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
             keyEventToString(keyboard.vkCode, keyboard.scanCode, &key.string) catch {};
             const extended: bool = ((keyboard.flags & c.LLKHF_EXTENDED) != 0);
 
-            var index = @as(usize, @intCast(keyboard.scanCode));
+            var index = @as(c_ulong, @intCast(keyboard.scanCode));
             if (extended) index += 0x100;
             if (index >= kbd_en_vscname.len) {
                 index = 0;
             }
-            key.symbol = kbd_en_vscname[index].ptr;
-
-            std.debug.print("Pressed vk: '{}', scancode: '{}' extended: {}, string: '{s}', symbol: '{s}'\n", .{
-                keyboard.vkCode, keyboard.scanCode, extended, std.mem.sliceTo(&key.string, 0), key.symbol
+            key.keysym = index;
+            std.debug.print("Pressed vk: '{}', scancode: '{}' extended: {}, string: '{s}', symbol: '{}'\n", .{
+                keyboard.vkCode, keyboard.scanCode, extended, std.mem.sliceTo(&key.string, 0), key.keysym
             });
         } else {
             key.pressed = false;
@@ -92,6 +91,10 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
         _ = c.TranslateMessage(&msg);
         _ = c.DispatchMessageA(&msg);
     }
+}
+
+pub fn keysymToString(keysym: c_ulong) [*c]const u8 {
+    return kbd_en_vscname[@as(usize, @intCast(keysym))].ptr;
 }
 
 // uses events stored in file to reproduce them

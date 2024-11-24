@@ -109,8 +109,6 @@ pub const KeyData = struct {
     repeated: bool,
     keycode: u8,
     keysym: c_ulong,
-    status: c_int,
-    symbol: [*c]const u8, // owned by x11, in static area. Must not be modified.
     string: [32]u8,
 
     comptime {
@@ -754,14 +752,15 @@ pub fn main() !void {
         if (app_state.keys.pop()) |k| {
             app_state.updateKeyStates(@intCast(k.keycode), k.pressed);
 
-            if (k.symbol == null) continue;
-            std.debug.print("Consumed: '{s}'\n", .{k.symbol});
+            const symbol = backend.keysymToString(k.keysym);
+            if (symbol == null) continue;
+            std.debug.print("Consumed: '{s}'\n", .{symbol});
 
             var text_: [*:0]const u8 = undefined;
 
-            if (symbols_lookup.get(std.mem.sliceTo(k.symbol, 0))) |symbol| {
-                std.debug.print("Replacement: '{s}'\n", .{symbol});
-                text_ = symbol;
+            if (symbols_lookup.get(std.mem.sliceTo(symbol, 0))) |lookup| {
+                std.debug.print("Replacement: '{s}'\n", .{lookup});
+                text_ = lookup;
             } else {
                 text_ = @ptrCast(&k.string);
             }
