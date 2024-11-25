@@ -15,6 +15,7 @@ const labels_lookup = @import("layout_labels.zig").labels_lookup;
 
 pub var is_running: bool = false;
 
+var thread_id: c.DWORD = undefined;
 var app_state_l: *AppState = undefined;
 var layout: c.HKL = undefined;
 var hook: ?c.HHOOK = null;
@@ -73,12 +74,12 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
     return c.CallNextHookEx(hook.?, nCode, wParam, lParam);
 }
 
-pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[]const u8) !void {
+pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
     defer is_running = false; // stopping not implemented yet
     is_running = true;
 
     _ = window_handle;
-    _ = record_file;
+    thread_id = c.GetCurrentThreadId();
 
     app_state_l = app_state;
     layout = c.GetKeyboardLayout(0);
@@ -87,23 +88,20 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
     defer _ = c.UnhookWindowsHookEx(hook.?);
 
     var msg: c.MSG = undefined;
-    while (c.GetMessageA(&msg, null, 0, 0) > 0) {
+    while (is_running and c.GetMessageA(&msg, null, 0, 0) > 0) {
         _ = c.TranslateMessage(&msg);
         _ = c.DispatchMessageA(&msg);
     }
+    std.debug.print("Exit win32 listener\n", .{});
+}
+
+pub fn stop() void {
+    is_running = false;
+    _ = c.PostThreadMessageA(thread_id, c.WM_QUIT, 0, 0);
 }
 
 pub fn keysymToString(keysym: c_ulong) [*c]const u8 {
     return kbd_en_vscname[@as(usize, @intCast(keysym))].ptr;
-}
-
-// uses events stored in file to reproduce them
-// assumes that only expected event types are recorded
-pub fn producer(app_state: *AppState, window_handle: *anyopaque, replay_file: []const u8, loop: bool) !void {
-    _ = app_state;
-    _ = window_handle;
-    _ = replay_file;
-    _ = loop;
 }
 
 // must match names used by X11:

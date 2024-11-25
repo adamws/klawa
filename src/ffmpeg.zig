@@ -3,6 +3,8 @@ const process = std.process;
 const Child = process.Child;
 const File = std.fs.File;
 
+const builtin = @import("builtin");
+
 pub const Ffmpeg = struct {
     child: Child,
 
@@ -14,8 +16,13 @@ pub const Ffmpeg = struct {
     ) !Ffmpeg {
         const resolution = try std.fmt.allocPrint(allocator, "{d}x{d}", .{ width, height });
         defer allocator.free(resolution);
+        const exec_name: []const u8 = switch (builtin.target.os.tag) {
+            .linux => "ffmpeg",
+            .windows => "ffmpeg.exe",
+            else => @compileError("unsupported platform"),
+        };
         const args = [_][]const u8{
-            "ffmpeg",     "-y",
+            exec_name,    "-y",
             "-f",         "rawvideo",
             "-framerate", "60",
             "-s",         resolution,

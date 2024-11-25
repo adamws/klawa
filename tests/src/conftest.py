@@ -2,6 +2,7 @@ import glob
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,18 +12,19 @@ logger = logging.getLogger(__name__)
 
 def pytest_addoption(parser) -> None:
     parser.addoption(
-        "--app-path",
+        "--app-dir",
         action="store",
-        help="Path to klawa executable",
+        help="Path to directory of klawa executable",
         default=False,
     )
 
 
 @pytest.fixture(scope="session")
 def app_path(request) -> Path:
-    app_path = request.config.getoption("--app-path")
+    app_path = request.config.getoption("--app-dir")
     assert app_path, "App path is required"
-    return Path(os.path.realpath(app_path))
+    app_name = "klawa.exe" if sys.platform == "win32" else "klawa"
+    return Path(os.path.realpath(app_path)) / app_name
 
 
 @pytest.fixture

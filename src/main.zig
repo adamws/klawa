@@ -104,7 +104,7 @@ const KeyOnScreen = struct {
     pressed: bool,
 };
 
-pub const KeyData = struct {
+pub const KeyData = extern struct {
     pressed: bool,
     repeated: bool,
     keycode: u8,
@@ -151,6 +151,49 @@ const CodepointBuffer = struct {
     }
 };
 
+const KeyDataProducer = struct {
+    reader: std.io.AnyReader,
+    frame_read: bool,
+    next_frame: usize = 0,
+
+    pub fn init(reader: std.io.AnyReader) KeyDataProducer {
+        return .{
+            .reader = reader,
+            .frame_read = true,
+        };
+    }
+
+    fn nextFrame(self: *KeyDataProducer) !usize {
+        if (self.frame_read) {
+            self.next_frame = try self.reader.readInt(usize, .little);
+            self.frame_read = false;
+        }
+        return self.next_frame;
+    }
+
+    fn next(self: *KeyDataProducer) !KeyData {
+        const key_data = try self.reader.readStruct(KeyData);
+        self.frame_read = true;
+        return key_data;
+    }
+
+    pub fn getDataForFrame(self: *KeyDataProducer, frame: usize) !?KeyData {
+        const next_frame = try self.nextFrame();
+        if (next_frame == frame) {
+            return try self.next();
+        }
+        return null;
+    }
+};
+
+fn getDataForFrame(frame: usize) !?KeyData {
+    if (key_data_producer) |*producer| {
+        return try producer.getDataForFrame(frame);
+    }
+    return null;
+}
+
+var key_data_producer: ?KeyDataProducer = null;
 pub var app_state: AppState = undefined;
 
 // https://github.com/bits/UTF-8-Unicode-Test-Documents/blob/master/UTF-8_sequence_unseparated/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt
@@ -595,18 +638,18 @@ pub fn main() !void {
     }
     defer if (pixels) |p| allocator.free(p);
 
-    var thread: ?std.Thread = null;
     if (res.args.replay) |replay_file| {
-        // TODO: this will start processing events before rendering ready, add synchronization
-        const loop = res.args.@"replay-loop" != 0;
-        thread = try std.Thread.spawn(.{}, backend.producer, .{ &app_state, window_handle, replay_file, loop });
-    } else {
-        // TODO: assign to thread var when close supported, join on this thread won't work now
-        _ = try std.Thread.spawn(.{}, backend.listener, .{ &app_state, window_handle, res.args.record });
+        const file = try fs.cwd().openFile(replay_file, .{});
+        //defer file.close();
+        var buf_reader = std.io.bufferedReader(file.reader());
+        const reader = buf_reader.reader();
+        key_data_producer = KeyDataProducer.init(reader.any());
     }
-    defer if (thread) |t| {
-        t.join();
-    };
+
+    if (res.args.replay == null) {
+        // TODO: defer when close supported, join on this thread won't work now
+        _ = try std.Thread.spawn(.{}, backend.listener, .{ &app_state, window_handle });
+    }
 
     var keycap_texture = blk: {
         const theme = Theme.fromString(app_config.data.theme) orelse unreachable;
@@ -663,6 +706,17 @@ pub fn main() !void {
     var codepoints_buffer = CodepointBuffer{};
 
     var drag_reference_position = rl.getWindowPosition();
+
+    // TODO: use buffered writer, to do that we must gracefully handle this thread exit,
+    // otherwise there is no good place to ensure writer flush
+    // TODO: support full file path
+    var event_file: ?fs.File = null;
+    if (res.args.record) |record_file| {
+        event_file = try cwd.createFile(record_file, .{});
+    }
+    defer if(event_file) |value| value.close();
+
+    var frame: usize = 0;
 
     while (!exit_window) {
         if (rl.windowShouldClose()) {
@@ -749,7 +803,36 @@ pub fn main() !void {
             };
         }
 
+        // replay
+        if (getDataForFrame(frame)) |data| {
+            if (data) |value| {
+                if (value.string[0] != 0) {
+                    // update only for keys which produe output,
+                    // this will not include modifiers
+                    app_state.last_char_timestamp = std.time.timestamp();
+                }
+                std.debug.print("Push {any}\n", .{value});
+                _ = app_state.keys.push(value);
+            }
+        } else |err| switch (err) {
+            error.EndOfStream => {
+                std.debug.print("END OF STREAM\n", .{});
+                exit_window = true;
+            },
+            else => return err,
+        }
+
         if (app_state.keys.pop()) |k| {
+            // save state (if recording)
+            if (event_file) |value| {
+                _ = try value.writeAll(std.mem.asBytes(&frame));
+                // TODO:
+                // writing full k struct is very wasteful, there is a lot of non-essential
+                // data (for example each release event writes 32 bytes of empty string),
+                // do not worry about that now, optimize for space later.
+                _ = try value.writeAll(std.mem.asBytes(&k));
+            }
+
             app_state.updateKeyStates(@intCast(k.keycode), k.pressed);
 
             const symbol = backend.keysymToString(k.keysym);
@@ -833,6 +916,7 @@ pub fn main() !void {
         }
         rl.endDrawing();
         tracy.frameMark();
+        frame += 1;
 
         if (renderer) |*r| {
             const rendering = tracy.traceNamed(@src(), "render");
@@ -852,14 +936,14 @@ pub fn main() !void {
             );
 
             try r.write(pixels.?);
-
-            if (!backend.is_running) {
-                exit_window = true;
-            }
         }
     }
 
     // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
+    switch (builtin.target.os.tag) {
+        .windows => backend.stop(),
+        else => {},
+    }
     backend.is_running = false;
 
     if (renderer) |*r| try r.wait();

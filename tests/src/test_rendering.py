@@ -1,6 +1,5 @@
 import logging
 import os
-from os.path import isfile
 import signal
 import shutil
 import subprocess
@@ -12,6 +11,10 @@ from pathlib import Path
 
 import pytest
 from pyvirtualdisplay.smartdisplay import SmartDisplay
+
+if sys.platform == "win32":
+    from ahk import AHK
+    ahk = AHK()
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ def get_screen_manager():
         else:
             return HostScreenManager()
     else:
-        pytest.skip(f"Platform '{sys.platform}' is not supported")
+        return HostScreenManager()
 
 
 def set_keyboard_layout(lang):
@@ -91,20 +94,22 @@ def set_keyboard_layout(lang):
 def screen_manager():
     with get_screen_manager() as _:
 
-        # this is a trick to keep one keyboard layout for full display lifetime,
-        # otherwise server would regenerate layout on last client disconection
-        # https://stackoverflow.com/questions/75919741/how-to-add-keyboard-layouts-to-xvfb
-        # 1. run some app in the background for full duration on test
-        # 2. configure keyboard layout
-        # 3. test
-        dummy = subprocess.Popen(["xlogo"])
-        time.sleep(0.5)
+        if sys.platform == "linux":
+            # this is a trick to keep one keyboard layout for full display lifetime,
+            # otherwise server would regenerate layout on last client disconection
+            # https://stackoverflow.com/questions/75919741/how-to-add-keyboard-layouts-to-xvfb
+            # 1. run some app in the background for full duration on test
+            # 2. configure keyboard layout
+            # 3. test
+            dummy = subprocess.Popen(["xlogo"])
+            time.sleep(0.5)
 
-        set_keyboard_layout("pl")
+            set_keyboard_layout("pl")
 
         yield
 
-        dummy.kill()
+        if sys.platform == "linux":
+            dummy.kill()
 
 
 def log_config(tmpdir) -> None:
@@ -139,6 +144,7 @@ def run_process_capture_logs(command, cwd, name="", process_holder=None) -> None
         stderr=subprocess.STDOUT,
         text=True,
         cwd=cwd,
+        encoding="utf-8",
     )
     assert process, "Process creation failed"
     assert process.stdout, "Could not get stdout"
@@ -150,6 +156,14 @@ def run_process_capture_logs(command, cwd, name="", process_holder=None) -> None
         logger.info(line.strip())
 
     process.wait()
+
+
+def run_typing_process(text: str) -> None:
+    if sys.platform == "win32":
+        ahk.send(text, key_delay=200, key_press_duration=50, send_mode="Event");
+    else:
+        result = subprocess.run(["xdotool", "type", "--delay", "200", text])
+        assert result.returncode == 0
 
 
 def __get_parameters():
@@ -192,7 +206,7 @@ def test_record_and_render(app_isolation, text: str, example) -> None:
         thread.start()
         time.sleep(2)
 
-        subprocess.run(["xdotool", "type", "--delay", "400", text])
+        run_typing_process(text)
 
         process = processes.get("klawa")
         if process and process.poll() is None:
@@ -202,3 +216,5 @@ def test_record_and_render(app_isolation, text: str, example) -> None:
 
         args = [app, "--replay", "events.bin", "--render", "output.webm"]
         run_process_capture_logs(args, app_dir)
+        assert (app_dir / "output.webm").is_file()
+

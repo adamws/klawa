@@ -105,7 +105,7 @@ fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
     _ = x11.XSync(display.?, 0);
 }
 
-pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[]const u8) !void {
+pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
     defer {
         std.debug.print("defer x11Listener\n", .{});
         is_running = false;
@@ -123,16 +123,6 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
     var event: c_int = 0;
     var err: c_int = 0;
     var xi_opcode: i32 = 0;
-
-    // TODO: use buffered writer, to do that we must gracefully handle this thread exit,
-    // otherwise there is no good place to ensure writer flush
-    // TODO: support full file path
-    var event_file: ?fs.File = null;
-    if (record_file) |filename| {
-        const cwd = fs.cwd();
-        event_file = try cwd.createFile(filename, .{});
-    }
-    defer event_file.?.close();
 
     if (x11.XQueryExtension(display, "XInputExtension", &xi_opcode, &event, &err) == 0) {
         std.debug.print("X Input extension not available.\n", .{});
@@ -168,11 +158,6 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
                     // offset by 8 to map x11 codes to linux input event codes
                     // (defined in linux/input-event-codes.h system header):
                     const keycode: u8 = @intCast(device_event.detail - 8);
-
-                    if (event_file) |file| {
-                        const device_event_data: [*]u8 = @ptrCast(device_event);
-                        _ = try file.writeAll(device_event_data[0..@sizeOf(x11.XIDeviceEvent)]);
-                    }
 
                     var key: KeyData = std.mem.zeroInit(KeyData, .{});
                     key.keycode = keycode;
@@ -210,98 +195,6 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque, record_file: ?[
 
 pub fn keysymToString(keysym: c_ulong) [*c]const u8 {
     return x11.XKeysymToString(keysym);
-}
-
-// uses events stored in file to reproduce them
-// assumes that only expected event types are recorded
-pub fn producer(app_state: *AppState, window_handle: *anyopaque, replay_file: []const u8, loop: bool) !void {
-    defer {
-        std.debug.print("defer x11Producer\n", .{});
-        is_running = false;
-    }
-    is_running = true;
-
-    const app_window = glfw.getX11Window(@ptrCast(window_handle));
-    std.debug.print("Application x11 window handle: 0x{X}\n", .{app_window});
-
-    const display: *x11.Display = x11.XOpenDisplay(null) orelse {
-        std.debug.print("Unable to connect to X server\n", .{});
-        return error.X11InitializationFailed;
-    };
-
-    var input_ctx = try X11InputContext.init(display, app_window);
-    defer input_ctx.deinit();
-
-    var run_loop = true;
-    std.debug.print("Replay events from file\n", .{});
-
-    // TODO: support full path of a file
-    const file = try fs.cwd().openFile(replay_file, .{});
-    defer file.close();
-    var buf_reader = std.io.bufferedReader(file.reader());
-    const reader = buf_reader.reader();
-
-    out: while (run_loop) {
-        // Simulate (approximately) timings of recorded events.
-        // This ignores effect of added delay due to the loop.
-        var events_count: usize = 0;
-        var timestamp: x11.Time = 0; // timestamp in x11 events is in milliseconds
-        var previous_timestamp: x11.Time = 0;
-
-        while (reader.readStruct(x11.XIDeviceEvent)) |device_event| {
-            if (!is_running) {
-                break :out;
-            }
-            timestamp = device_event.time;
-            const time_to_wait = timestamp - previous_timestamp;
-            // first would be large because it is in reference to x11 server start,
-            // delay only on 1..n event
-            if (events_count != 0 and time_to_wait != 0) {
-                std.time.sleep(time_to_wait * std.time.ns_per_ms);
-            }
-
-            // do stuff with event-from-file
-
-            app_state.updateKeyStates(
-                @intCast(device_event.detail - 8),
-                device_event.evtype == x11.XI_KeyPress,
-            );
-
-            if (device_event.evtype == x11.XI_KeyPress) {
-                var key: KeyData = std.mem.zeroInit(KeyData, .{});
-                _ = input_ctx.lookupString(&device_event, &key);
-
-                if (key.string[0] != 0) {
-                    app_state.last_char_timestamp = std.time.timestamp();
-                }
-
-                while (!app_state.keys.push(key)) : ({
-                    // this is unlikely scenario - normal typing would not be fast enough
-                    std.debug.print("Consumer outpaced, try again\n", .{});
-                    std.time.sleep(10 * std.time.ns_per_ms);
-                }) {}
-                std.debug.print("Produced (fake): '{any}'\n", .{key});
-            }
-
-            // continue with next events
-            previous_timestamp = timestamp;
-            events_count += 1;
-        } else |err| switch (err) {
-            error.EndOfStream => {
-                std.debug.print("End of file\n", .{});
-                if (loop) {
-                    try file.seekTo(0);
-                    for (app_state.key_states, 0..) |_, i| {
-                        var s = &app_state.key_states[i];
-                        s.pressed = false;
-                    }
-                } else {
-                    run_loop = false;
-                }
-            },
-            else => return err,
-        }
-    }
 }
 
 pub fn get_mouse_position() !struct { x: usize, y: usize } {

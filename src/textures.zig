@@ -79,7 +79,6 @@ fn getPositions(sizes: []const rl.Vector2) [keycap_sizes.len]rl.Vector2 {
 }
 
 pub fn getPositionBySize(size: rl.Vector2) rl.Vector2 {
-    std.debug.print("Looking for {d} {d}\n", .{size.x, size.y});
     for (keycap_sizes, 0..) |s, i| {
         if (size.x == s.x and size.y == s.y) {
             return atlas_positions[i];
