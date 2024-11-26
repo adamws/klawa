@@ -18,6 +18,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    exe.subsystem = .Windows;
+
     const exe_options = b.addOptions();
     exe.root_module.addOptions("build_options", exe_options);
 
