@@ -143,7 +143,7 @@ const kbd_en_vscname = [_][]const u8 {
     // zig fmt: on
 };
 
-pub fn get_mouse_position() !struct { x: usize, y: usize } {
+pub fn getMousePosition() !struct { x: usize, y: usize } {
     var point: c.POINT = undefined;
     const result = c.GetCursorPos(&point);
 

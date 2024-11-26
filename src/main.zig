@@ -735,7 +735,7 @@ pub fn main() !void {
             }
 
             const current_position: rl.Vector2 = blk: {
-                const p = try backend.get_mouse_position();
+                const p = try backend.getMousePosition();
                 break :blk .{
                     .x = @floatFromInt(p.x),
                     .y = @floatFromInt(p.y),

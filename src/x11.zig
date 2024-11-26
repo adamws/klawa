@@ -197,7 +197,7 @@ pub fn keysymToString(keysym: c_ulong) [*c]const u8 {
     return x11.XKeysymToString(keysym);
 }
 
-pub fn get_mouse_position() !struct { x: usize, y: usize } {
+pub fn getMousePosition() !struct { x: usize, y: usize } {
     // Open a connection to the X server
     const display: *x11.Display = x11.XOpenDisplay(null) orelse {
         std.debug.print("Unable to connect to X server\n", .{});
