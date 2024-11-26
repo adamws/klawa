@@ -5,3 +5,4 @@ pytest-html==4.1.1
 pytest-xdist==3.6.1
 PyVirtualDisplay==3.0
 ahk==1.8.0; platform_system == "Windows"
+pywin32==308; platform_system == "Windows"

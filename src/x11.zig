@@ -1,5 +1,6 @@
 const std = @import("std");
 const fs = std.fs;
+const posix = std.posix;
 
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
@@ -82,7 +83,7 @@ const X11InputContext = struct {
     }
 };
 
-pub var is_running: bool = false;
+var is_running: bool = false;
 
 fn xiSetMask(ptr: []u8, event: usize) void {
     const offset: u3 = @truncate(event);
@@ -106,10 +107,6 @@ fn selectEvents(display: ?*x11.Display, win: x11.Window) void {
 }
 
 pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
-    defer {
-        std.debug.print("defer x11Listener\n", .{});
-        is_running = false;
-    }
     is_running = true;
 
     const app_window = glfw.getX11Window(@ptrCast(window_handle));
@@ -139,13 +136,24 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
     var input_ctx = try X11InputContext.init(display, app_window);
     defer input_ctx.deinit();
 
-    while (true) {
-        // x11 wait for event (only key press/release selected)
-        var ev: x11.XEvent = undefined;
-        const cookie: *x11.XGenericEventCookie = @ptrCast(&ev.xcookie);
-        // blocks, makes this thread impossible to exit:
-        // TODO: maybe use alarms?
-        // https://nrk.neocities.org/articles/x11-timeout-with-xsyncalarm
+    var fd = [1]posix.pollfd{posix.pollfd{
+        .fd = x11.ConnectionNumber(display),
+        .events = posix.POLL.IN,
+        .revents = undefined,
+    }};
+
+    var ev: x11.XEvent = undefined;
+    const cookie: *x11.XGenericEventCookie = @ptrCast(&ev.xcookie);
+
+    while (is_running) {
+        // Use poll to give this thread a chance for clean exit
+        const pending = x11.XPending(display) > 0 or try posix.poll(&fd, 100) > 0;
+        if (!pending) continue;
+
+        // Wait for event (only key press/release selected), should not block since
+        // we got here after poll but there is no documented guarantee.
+        // This relies on implementation details of x11, see [1] for problem description.
+        // [1] https://nrk.neocities.org/articles/x11-timeout-with-xsyncalarm
         _ = x11.XNextEvent(display, &ev);
 
         if (x11.XGetEventData(display, cookie) != 0 and
@@ -167,7 +175,7 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
                         _ = input_ctx.lookupString(device_event, &key);
 
                         if (key.string[0] != 0) {
-                            // update only for keys which produe output,
+                            // update only for keys which produce output,
                             // this will not include modifiers
                             app_state.last_char_timestamp = std.time.timestamp();
                         }
@@ -191,6 +199,12 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
 
     _ = x11.XSync(display, 0);
     _ = x11.XCloseDisplay(display);
+
+    std.debug.print("Exit x11 listener\n", .{});
+}
+
+pub fn stop() void {
+    is_running = false;
 }
 
 pub fn keysymToString(keysym: c_ulong) [*c]const u8 {

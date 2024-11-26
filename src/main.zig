@@ -485,9 +485,30 @@ fn updateWindowPos(x: i32, y: i32) void {
     }
 }
 
+var exit_window = false;
+
+fn sigtermHandler(sig: c_int) callconv(.C) void {
+    _ = sig;
+    exit_window = true;
+}
+
+fn sigtermInstall() !void {
+    const act = std.os.linux.Sigaction{
+        .handler = .{ .handler = sigtermHandler },
+        .mask = std.os.linux.empty_sigset,
+        .flags = 0,
+    };
+
+    if (std.os.linux.sigaction(std.os.linux.SIG.TERM, &act, null) != 0) {
+        return error.SignalHandlerError;
+    }
+}
+
 pub fn main() !void {
     const trace_ = tracy.trace(@src());
     defer trace_.end();
+
+    try sigtermInstall();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -646,9 +667,16 @@ pub fn main() !void {
         key_data_producer = KeyDataProducer.init(reader.any());
     }
 
-    if (res.args.replay == null) {
-        // TODO: defer when close supported, join on this thread won't work now
-        _ = try std.Thread.spawn(.{}, backend.listener, .{ &app_state, window_handle });
+    const replay: bool = res.args.replay != null;
+    const listener = switch(replay) {
+       false => try std.Thread.spawn(.{}, backend.listener, .{ &app_state, window_handle }),
+       true => null,
+    };
+    defer {
+        if (listener) |l| {
+            backend.stop();
+            l.join();
+        }
     }
 
     var keycap_texture = blk: {
@@ -698,7 +726,6 @@ pub fn main() !void {
     // TODO: font should be configurable
     const font = rl.loadFontFromMemory(".ttf", font_data, typing_font_size, codepoints);
 
-    var exit_window = false;
     var show_gui = false;
 
     const typing_persistance_sec = 2;
@@ -807,7 +834,7 @@ pub fn main() !void {
         if (getDataForFrame(frame)) |data| {
             if (data) |value| {
                 if (value.string[0] != 0) {
-                    // update only for keys which produe output,
+                    // update only for keys which produce output,
                     // this will not include modifiers
                     app_state.last_char_timestamp = std.time.timestamp();
                 }
@@ -939,15 +966,8 @@ pub fn main() !void {
         }
     }
 
-    // NOTE: not able to stop x11Listener yet, applicable only for x11Producer
-    switch (builtin.target.os.tag) {
-        .windows => backend.stop(),
-        else => {},
-    }
-    backend.is_running = false;
-
     if (renderer) |*r| try r.wait();
 
-    std.debug.print("Exit\n", .{});
+    std.debug.print("Main thread exit\n", .{});
 }
 

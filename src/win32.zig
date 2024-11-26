@@ -13,7 +13,7 @@ const AppState = @import("main.zig").AppState;
 const KeyData = @import("main.zig").KeyData;
 const labels_lookup = @import("layout_labels.zig").labels_lookup;
 
-pub var is_running: bool = false;
+var is_running: bool = false;
 
 var thread_id: c.DWORD = undefined;
 var app_state_l: *AppState = undefined;
@@ -75,10 +75,8 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
 }
 
 pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
-    defer is_running = false; // stopping not implemented yet
-    is_running = true;
-
     _ = window_handle;
+    is_running = true;
     thread_id = c.GetCurrentThreadId();
 
     app_state_l = app_state;

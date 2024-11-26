@@ -13,6 +13,8 @@ import pytest
 from pyvirtualdisplay.smartdisplay import SmartDisplay
 
 if sys.platform == "win32":
+    import win32con
+    import win32gui
     from ahk import AHK
     ahk = AHK()
 
@@ -210,9 +212,18 @@ def test_record_and_render(app_isolation, text: str, example) -> None:
 
         process = processes.get("klawa")
         if process and process.poll() is None:
-            os.kill(process.pid, signal.SIGTERM)
+            if sys.platform == "win32":
+                h = win32gui.FindWindow(None, "klawa")
+                win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+            else:
+                os.kill(process.pid, signal.SIGTERM)
 
-        thread.join()
+        thread.join(timeout=2)
+
+        if thread.is_alive():
+            print("The klawa process is still running after the timeout")
+            if process and process.poll() is None:
+                os.kill(process.pid, signal.SIGKILL)
 
         args = [app, "--replay", "events.bin", "--render", "output.webm"]
         run_process_capture_logs(args, app_dir)
