@@ -91,6 +91,7 @@ const ConfigData = struct {
     background_color: u32 = 0x000000ff,
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
+    typing_background_color: u32 = 0x00000080,
     layout_preset: []const u8 = "tkl_ansi",
     layout_path: []const u8 = "", // absolute or realative to config file
     theme: []const u8 = "default",
@@ -98,6 +99,7 @@ const ConfigData = struct {
     theme_custom_atlas_map: []const u8 = "",
     theme_custom_keycap_path: []const u8 = "",
     show_typing: bool = true,
+    show_keyboard: bool = true,
     key_scale: f32 = 1.0,
     key_tint_color: u32 = 0xff0000ff, // alpha=1
     key_press_effect: []const u8 = "move",
@@ -218,11 +220,15 @@ pub const AppState = struct {
     keycode_keyboard_lookup: [256]i32,
     window_width: c_int,
     window_height: c_int,
+    show_typing: bool,
+    show_keyboard: bool,
     key_scale: f32,
     key_press_effect: KeyPressEffect,
     key_pressed_travel: f32,
     background_color: rl.Color,
+    typing_font_size: i32,
     typing_font_color: rl.Color,
+    typing_background_color: rl.Color,
     key_tint_color: rl.Color,
     keys: Queue = Queue.init(),
     last_char_timestamp: i64 = 0,
@@ -239,11 +245,15 @@ pub const AppState = struct {
             .keycode_keyboard_lookup = .{-1} ** 256,
             .window_width = -1,
             .window_height = -1,
+            .show_typing = config_data.show_typing,
+            .show_keyboard = config_data.show_keyboard,
             .key_scale = config_data.key_scale,
             .key_press_effect = KeyPressEffect.fromString(config_data.key_press_effect) orelse KeyPressEffect.move,
             .key_pressed_travel = @divTrunc(KEY_1U_PX, 10) * config_data.key_scale,
             .background_color = rl.Color.fromInt(config_data.background_color),
+            .typing_font_size = config_data.typing_font_size,
             .typing_font_color = rl.Color.fromInt(config_data.typing_font_color),
+            .typing_background_color = rl.Color.fromInt(config_data.typing_background_color),
             .key_tint_color = rl.Color.fromInt(config_data.key_tint_color),
         };
 
@@ -362,6 +372,9 @@ pub const AppState = struct {
         const bbox = calculateBoundingBox(keys);
         self.window_width = @intFromFloat(bbox.w * KEY_1U_PX * self.key_scale);
         self.window_height = @intFromFloat(bbox.h * KEY_1U_PX * self.key_scale);
+        if (!self.show_keyboard) {
+            self.window_height = self.typing_font_size;
+        }
         std.debug.print("Window size: {}x{}\n", .{ self.window_width, self.window_height });
     }
 
@@ -631,9 +644,6 @@ pub fn main() !void {
         else => return err,
     };
 
-    // this option is not hot-reloadable yet:
-    const typing_font_size = app_config.data.typing_font_size;
-
     var config_watch = try Watch.init(config_path);
     defer config_watch.deinit();
 
@@ -738,7 +748,8 @@ pub fn main() !void {
     std.debug.print("Text contains {} codepoints\n", .{codepoints.len});
 
     // TODO: font should be configurable
-    const font = rl.loadFontFromMemory(".ttf", font_data, typing_font_size, codepoints);
+    var font = rl.loadFontFromMemory(".ttf", font_data, app_state.typing_font_size, codepoints);
+    defer rl.unloadFont(font);
 
     var show_gui = false;
 
@@ -802,7 +813,7 @@ pub fn main() !void {
                 .window_position_x, .window_position_y => {
                     updateWindowPos(app_config.data.window_position_x, app_config.data.window_position_y);
                 },
-                .layout_path, .layout_preset, .key_scale => {
+                .layout_path, .layout_preset, .key_scale, .show_keyboard => {
                     if (getState(allocator, config_dir, app_config.data)) |new_state| {
                         app_state = new_state;
                         rl.setWindowSize(app_state.window_width, app_state.window_height);
@@ -829,8 +840,18 @@ pub fn main() !void {
                         std.debug.print("Got unrecognized theme: '{s}', reload aborted\n", .{app_config.data.theme});
                     }
                 },
-                inline .background_color, .typing_font_color, .key_tint_color => |color| {
+                .typing_font_size => {
+                    rl.unloadFont(font);
+                    // TODO: sanitize, sizes <0 and larger than window height probably should be skipped
+                    font = rl.loadFontFromMemory(".ttf", font_data, app_config.data.typing_font_size, codepoints);
+                    app_state.typing_font_size = app_config.data.typing_font_size;
+                },
+                inline .background_color, .typing_font_color, .typing_background_color, .key_tint_color => |color| {
                     app_state.updateColor(@tagName(color), app_config.data);
+                },
+                inline .show_typing => |value| {
+                    const name = @tagName(value);
+                    @field(app_state, name) = @field(app_config.data, name);
                 },
                 .key_press_effect => {
                     if (KeyPressEffect.fromString(app_config.data.key_press_effect)) |value| {
@@ -901,42 +922,46 @@ pub fn main() !void {
 
         const rot = rl.Vector2{ .x = 0, .y = 0 };
 
-        for (app_state.key_states) |k| {
-            var dst = k.dst;
-            if (k.pressed) switch(app_state.key_press_effect) {
-                .move => dst.y += app_state.key_pressed_travel,
-                .squash => {
-                    dst.height -= app_state.key_pressed_travel;
-                    dst.y += app_state.key_pressed_travel;
-                },
-                else => {},
-            };
-            const tint = if (k.pressed) app_state.key_tint_color else rl.Color.white;
-            rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
+        if (app_state.show_keyboard) {
+            for (app_state.key_states) |k| {
+                var dst = k.dst;
+                if (k.pressed) switch(app_state.key_press_effect) {
+                    .move => dst.y += app_state.key_pressed_travel,
+                    .squash => {
+                        dst.height -= app_state.key_pressed_travel;
+                        dst.y += app_state.key_pressed_travel;
+                    },
+                    else => {},
+                };
+                const tint = if (k.pressed) app_state.key_tint_color else rl.Color.white;
+                rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
+            }
         }
 
-        if (app_config.data.show_typing and
+        if (app_state.show_typing and
             std.time.timestamp() - app_state.last_char_timestamp <= typing_persistance_sec) {
+
+            const typing_y_pos: i32 = @divTrunc(app_state.window_height - app_state.typing_font_size, 2);
             rl.drawRectangle(
                 0,
-                @divTrunc(app_state.window_height - typing_font_size, 2),
+                typing_y_pos,
                 app_state.window_width,
-                typing_font_size,
-                rl.Color{ .r = 0, .g = 0, .b = 0, .a = 128 },
+                app_state.typing_font_size,
+                app_state.typing_background_color,
             );
 
             var offset: f32 = 0;
             var it = codepoints_buffer.iterator();
 
-            const scale_factor: f32 = @as(f32, @floatFromInt(typing_font_size)) / @as(f32, @floatFromInt(font.baseSize));
+            const scale_factor: f32 = @as(f32, @floatFromInt(app_state.typing_font_size)) / @as(f32, @floatFromInt(font.baseSize));
 
             while (it.next()) |cp| {
                 const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
                 const glyph_position = rl.Vector2.init(
                     @as(f32, @floatFromInt(@divTrunc(app_state.window_width, 2))) - offset,
-                    @floatFromInt(@divTrunc(app_state.window_height - typing_font_size, 2)),
+                    @floatFromInt(typing_y_pos),
                 );
-                rl.drawTextCodepoint(font, cp, glyph_position, @floatFromInt(typing_font_size), app_state.typing_font_color);
+                rl.drawTextCodepoint(font, cp, glyph_position, @floatFromInt(app_state.typing_font_size), app_state.typing_font_color);
 
                 offset += switch (font.glyphs[glyph_index].advanceX) {
                     0 => font.recs[glyph_index].width * scale_factor,
