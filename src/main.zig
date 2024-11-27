@@ -70,11 +70,6 @@ pub const Theme = enum {
     }
 };
 
-pub const ThemeAtlasMapping = enum {
-    by_sizes,
-    by_mapping, // not supported yet
-};
-
 const ConfigData = struct {
     window_undecorated: bool = true,
     window_transparent: bool = false,
