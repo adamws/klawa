@@ -70,6 +70,16 @@ pub const Theme = enum {
     }
 };
 
+pub const KeyPressEffect = enum {
+    none,
+    move,
+    squash,
+
+    pub fn fromString(value: []const u8) ?KeyPressEffect {
+        return std.meta.stringToEnum(KeyPressEffect, value);
+    }
+};
+
 const ConfigData = struct {
     window_undecorated: bool = true,
     window_transparent: bool = false,
@@ -77,6 +87,7 @@ const ConfigData = struct {
     window_mouse_passthrough: bool = false, // warning: can't use close or move with mouse, must kill to exit
     window_position_x: i32 = -1,
     window_position_y: i32 = -1,
+    draw_fps: bool = false,
     background_color: u32 = 0x000000ff,
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
@@ -87,9 +98,9 @@ const ConfigData = struct {
     theme_custom_atlas_map: []const u8 = "",
     theme_custom_keycap_path: []const u8 = "",
     show_typing: bool = true,
-    key_tint_color: u32 = 0xff0000ff, // alpha=1
     key_scale: f32 = 1.0,
-    draw_fps: bool = false,
+    key_tint_color: u32 = 0xff0000ff, // alpha=1
+    key_press_effect: []const u8 = "move",
 };
 
 const KeyOnScreen = struct {
@@ -616,6 +627,8 @@ pub fn main() !void {
     var typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
     var key_tint_color: rl.Color = rl.Color.fromInt(app_config.data.key_tint_color);
 
+    var key_press_effect = KeyPressEffect.fromString(app_config.data.key_press_effect) orelse KeyPressEffect.move;
+
     var config_watch = try Watch.init(config_path);
     defer config_watch.deinit();
 
@@ -828,6 +841,13 @@ pub fn main() !void {
                 .background_color => background_color = rl.Color.fromInt(app_config.data.background_color),
                 .typing_font_color => typing_font_color = rl.Color.fromInt(app_config.data.typing_font_color),
                 .key_tint_color => key_tint_color = rl.Color.fromInt(app_config.data.key_tint_color),
+                .key_press_effect => {
+                    if (KeyPressEffect.fromString(app_config.data.key_press_effect)) |new_press_effect| {
+                        key_press_effect = new_press_effect;
+                    } else {
+                        std.debug.print("Got unrecognized key_press_effect value: '{s}', fallback to default\n", .{app_config.data.key_press_effect});
+                    }
+                },
                 else => {},
             };
         }
@@ -892,7 +912,14 @@ pub fn main() !void {
 
         for (app_state.key_states) |k| {
             var dst = k.dst;
-            if (k.pressed) dst.y += app_state.key_pressed_travel;
+            if (k.pressed) switch(key_press_effect) {
+                .move => dst.y += app_state.key_pressed_travel,
+                .squash => {
+                    dst.height -= app_state.key_pressed_travel;
+                    dst.y += app_state.key_pressed_travel;
+                },
+                else => {},
+            };
             const tint = if (k.pressed) key_tint_color else rl.Color.white;
             rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
         }
