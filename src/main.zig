@@ -216,6 +216,7 @@ pub const AppState = struct {
     window_width: c_int,
     window_height: c_int,
     scale: f32,
+    key_pressed_travel: f32,
     keys: Queue = Queue.init(),
     last_char_timestamp: i64 = 0,
 
@@ -232,6 +233,7 @@ pub const AppState = struct {
             .window_width = -1,
             .window_height = -1,
             .scale = config_data.key_scale,
+            .key_pressed_travel = @divTrunc(KEY_1U_PX, 10) * config_data.key_scale,
         };
         calcualteWindoWize(&self);
         try initKeys(&self, config_data.theme_custom_atlas_map);
@@ -247,7 +249,7 @@ pub const AppState = struct {
             var s = &self.key_states[index];
             s.pressed = false;
 
-            s.dst = getKeyDestination(self.*, &k);
+            s.dst = getKeyDestination(&k);
             s.angle = @floatCast(k.rotation_angle);
 
             if (atlas_map.len != 0) {
@@ -258,10 +260,15 @@ pub const AppState = struct {
             } else {
                 s.src = getKeySource(rl.Vector2{.x = s.dst.width, .y = s.dst.height});
             }
+
+            s.dst.x *= self.scale;
+            s.dst.y *= self.scale;
+            s.dst.width *= self.scale;
+            s.dst.height *= self.scale;
         }
     }
 
-    fn getKeyDestination(self: AppState, k: *const kle.Key) rl.Rectangle {
+    fn getKeyDestination(k: *const kle.Key) rl.Rectangle {
         const angle_rad = std.math.rad_per_deg * k.rotation_angle;
         const point = math.Vec2{ .x = k.x, .y = k.y };
         const rot_origin = math.Vec2{ .x = k.rotation_x, .y = k.rotation_y };
@@ -273,14 +280,14 @@ pub const AppState = struct {
         // iso enter, might not work when rotated. For now only non-rectangular supported key
         var x_offset: f32 = 0;
         if (k.width == 1.25 and k.width2 == 1.5 and k.height == 2 and k.height2 == 1) {
-            x_offset = -0.25 * KEY_1U_PX * self.scale;
+            x_offset = -0.25 * KEY_1U_PX;
         }
 
         return .{
-            .x = @as(f32, @floatCast(KEY_1U_PX * result.x)) * self.scale + x_offset,
-            .y = @as(f32, @floatCast(KEY_1U_PX * result.y)) * self.scale,
-            .width = width * self.scale,
-            .height = height * self.scale,
+            .x = @as(f32, @floatCast(KEY_1U_PX * result.x)) + x_offset,
+            .y = @as(f32, @floatCast(KEY_1U_PX * result.y)),
+            .width = width,
+            .height = height,
         };
     }
 
@@ -890,7 +897,7 @@ pub fn main() !void {
 
         for (app_state.key_states) |k| {
             var dst = k.dst;
-            if (k.pressed) dst.y += 5;
+            if (k.pressed) dst.y += app_state.key_pressed_travel;
             const tint = if (k.pressed) key_tint_color else rl.Color.white;
             rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
         }
