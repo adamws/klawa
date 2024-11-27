@@ -214,44 +214,56 @@ const all_text = text ++ symbols;
 const font_data = @embedFile("resources/DejaVuSansMono.ttf");
 
 pub const AppState = struct {
-    allocator: std.mem.Allocator,
-    parsed: std.json.Parsed(kle.Keyboard),
-    keyboard: kle.Keyboard,
-    key_states: []KeyOnScreen,
+    key_states: [MAX_KEYS]KeyOnScreen,
     keycode_keyboard_lookup: [256]i32,
     window_width: c_int,
     window_height: c_int,
-    scale: f32,
+    key_scale: f32,
+    key_press_effect: KeyPressEffect,
     key_pressed_travel: f32,
+    background_color: rl.Color,
+    typing_font_color: rl.Color,
+    key_tint_color: rl.Color,
     keys: Queue = Queue.init(),
     last_char_timestamp: i64 = 0,
 
+    const MAX_KEYS = 512;
     const Queue = SpscQueue(32, KeyData);
     const KEY_1U_PX = 64;
 
-    pub fn init(allocator: std.mem.Allocator, parsed: std.json.Parsed(kle.Keyboard), config_data: *ConfigData) !AppState {
+    pub fn init(keys: []kle.Key, config_data: ConfigData) !AppState {
+        if (keys.len > MAX_KEYS) return error.TooManyKeys;
+
         var self: AppState = .{
-            .allocator = allocator,
-            .parsed = parsed,
-            .keyboard = parsed.value,
-            .key_states = try allocator.alloc(KeyOnScreen, parsed.value.keys.len),
+            .key_states = undefined,
             .keycode_keyboard_lookup = .{-1} ** 256,
             .window_width = -1,
             .window_height = -1,
-            .scale = config_data.key_scale,
+            .key_scale = config_data.key_scale,
+            .key_press_effect = KeyPressEffect.fromString(config_data.key_press_effect) orelse KeyPressEffect.move,
             .key_pressed_travel = @divTrunc(KEY_1U_PX, 10) * config_data.key_scale,
+            .background_color = rl.Color.fromInt(config_data.background_color),
+            .typing_font_color = rl.Color.fromInt(config_data.typing_font_color),
+            .key_tint_color = rl.Color.fromInt(config_data.key_tint_color),
         };
-        calcualteWindoWize(&self);
-        try initKeys(&self, config_data.theme_custom_atlas_map);
-        try calculateKeyLookup(&self);
+
+        calcualteWindoWize(&self, keys);
+        try initKeys(&self, keys, config_data.theme_custom_atlas_map);
+        try calculateKeyLookup(&self, keys);
         return self;
     }
 
-    fn initKeys(self: *AppState, atlas_map: []const u8) !void {
-        const atlas_map_parsed = try convertAtlasMap(self, atlas_map) orelse &[0]rl.Vector2{};
-        defer self.allocator.free(atlas_map_parsed);
+    pub fn updateColor(self: *AppState, comptime name: []const u8, config_data: ConfigData) void {
+        @field(self, name) = rl.Color.fromInt(@field(config_data, name));
+    }
 
-        for (self.keyboard.keys, 0..) |k, index| {
+    fn initKeys(self: *AppState, keys: []kle.Key, atlas_map: []const u8) !void {
+        var atlas_map_parsed: [MAX_KEYS]rl.Vector2 = undefined;
+        if (atlas_map.len != 0) {
+            try convertAtlasMap(atlas_map, &atlas_map_parsed);
+        }
+
+        for (keys, 0..) |k, index| {
             var s = &self.key_states[index];
             s.pressed = false;
 
@@ -267,10 +279,10 @@ pub const AppState = struct {
                 s.src = getKeySource(rl.Vector2{.x = s.dst.width, .y = s.dst.height});
             }
 
-            s.dst.x *= self.scale;
-            s.dst.y *= self.scale;
-            s.dst.width *= self.scale;
-            s.dst.height *= self.scale;
+            s.dst.x *= self.key_scale;
+            s.dst.y *= self.key_scale;
+            s.dst.width *= self.key_scale;
+            s.dst.height *= self.key_scale;
         }
     }
 
@@ -307,12 +319,12 @@ pub const AppState = struct {
         };
     }
 
-    fn convertAtlasMap(self: *AppState, atlas_map: []const u8) !?[]rl.Vector2 {
-        if (atlas_map.len == 0) return null;
-        var result = try self.allocator.alloc(rl.Vector2, atlas_map.len);
+    fn convertAtlasMap(atlas_map: []const u8, atlas_map_parsed: []rl.Vector2) !void {
         var iter = std.mem.split(u8, atlas_map, ",");
         var i: usize = 0;
         while (iter.next()) |map| {
+            if (i >= atlas_map_parsed.len) return error.TooManyEntriesInAtlasMap;
+
             std.debug.print("{} {s}\n", .{i, map});
 
             var number_parsed: [2]usize = undefined;
@@ -324,16 +336,15 @@ pub const AppState = struct {
                 j += 1;
             }
 
-            result[i].x = @floatFromInt(number_parsed[0]);
-            result[i].y = @floatFromInt(number_parsed[1]);
+            atlas_map_parsed[i].x = @floatFromInt(number_parsed[0]);
+            atlas_map_parsed[i].y = @floatFromInt(number_parsed[1]);
             i += 1;
         }
-        return result;
     }
 
-    fn calculateKeyLookup(self: *AppState) !void {
+    fn calculateKeyLookup(self: *AppState, keys: []kle.Key) !void {
         var universal_key_label: [128]u8 = undefined;
-        for (self.keyboard.keys, 0..) |key, index| {
+        for (keys, 0..) |key, index| {
             for (key.labels) |maybe_label| {
                 if (maybe_label) |label| {
                     var iter = std.mem.split(u8, label, ",");
@@ -347,17 +358,17 @@ pub const AppState = struct {
         }
     }
 
-    fn calcualteWindoWize(self: *AppState) void {
-        const bbox = self.calculateBoundingBox();
-        self.window_width = @intFromFloat(bbox.w * KEY_1U_PX * self.scale);
-        self.window_height = @intFromFloat(bbox.h * KEY_1U_PX * self.scale);
+    fn calcualteWindoWize(self: *AppState, keys: []kle.Key) void {
+        const bbox = calculateBoundingBox(keys);
+        self.window_width = @intFromFloat(bbox.w * KEY_1U_PX * self.key_scale);
+        self.window_height = @intFromFloat(bbox.h * KEY_1U_PX * self.key_scale);
         std.debug.print("Window size: {}x{}\n", .{ self.window_width, self.window_height });
     }
 
-    fn calculateBoundingBox(self: AppState) struct { x: f64, y: f64, w: f64, h: f64 } {
+    fn calculateBoundingBox(keys: []kle.Key) struct { x: f64, y: f64, w: f64, h: f64 } {
         var max_x: f64 = 0;
         var max_y: f64 = 0;
-        for (self.keyboard.keys) |k| {
+        for (keys) |k| {
             const angle = k.rotation_angle;
             if (angle != 0) {
                 const angle_rad = std.math.rad_per_deg * angle;
@@ -401,30 +412,30 @@ pub const AppState = struct {
             self.key_states[index].pressed = pressed;
         }
     }
-
-    pub fn deinit(self: *AppState) void {
-        self.parsed.deinit();
-        self.allocator.free(self.key_states);
-        self.* = undefined;
-    }
 };
 
-fn getState(allocator: std.mem.Allocator, config_path: []const u8, layout_path: []const u8, layout: Layout, config_data: *ConfigData) !AppState {
-    const kle_str: []const u8 = blk: {
-        if (layout_path.len != 0) {
-            std.debug.print("layout = {s}\n", .{layout_path});
-            var dir = try fs.cwd().openDir(config_path, .{});
-            defer dir.close();
-            var layout_file = try dir.openFile(layout_path, .{});
-            break :blk try layout_file.readToEndAlloc(allocator, 4096);
-        } else {
-            break :blk try allocator.dupe(u8, layout.getData());
-        }
-    };
+fn getKleStr(allocator: std.mem.Allocator, config_path: []const u8, config_data: ConfigData) ![]const u8 {
+    if (config_data.layout_path.len != 0) {
+        std.debug.print("Load layout using file '{s}'\n", .{config_data.layout_path});
+        var dir = try fs.cwd().openDir(config_path, .{});
+        defer dir.close();
+        var layout_file = try dir.openFile(config_data.layout_path, .{});
+        return try layout_file.readToEndAlloc(allocator, 4096);
+    }
+
+    const layout = Layout.fromString(config_data.layout_preset) orelse Layout.tkl_ansi;
+    std.debug.print("Load layout using preset '{s}'\n", .{@tagName(layout)});
+    return try allocator.dupe(u8, layout.getData());
+}
+
+fn getState(allocator: std.mem.Allocator, config_path: []const u8, config_data: ConfigData) !AppState {
+    const kle_str: []const u8 = try getKleStr(allocator, config_path, config_data);
     defer allocator.free(kle_str);
 
-    const keyboard = try kle.parseFromSlice(allocator, kle_str);
-    return AppState.init(allocator, keyboard, config_data);
+    const parsed = try kle.parseFromSlice(allocator, kle_str);
+    defer parsed.deinit();
+
+    return AppState.init(parsed.value.keys, config_data);
 }
 
 test "bounding box" {
@@ -451,10 +462,10 @@ test "bounding box" {
 
     for (cases) |case| {
         const parsed = try kle.parseFromSlice(allocator, case.layout);
+        defer parsed.deinit();
 
-        var default_config: ConfigData = .{};
-        var s = try AppState.init(allocator, parsed, &default_config);
-        defer s.deinit();
+        const default_config: ConfigData = .{};
+        const s = try AppState.init(parsed.value.keys, default_config);
 
         try std.testing.expect(s.window_width == case.expected.w);
         try std.testing.expect(s.window_height == case.expected.h);
@@ -623,22 +634,10 @@ pub fn main() !void {
     // this option is not hot-reloadable yet:
     const typing_font_size = app_config.data.typing_font_size;
 
-    var background_color: rl.Color = rl.Color.fromInt(app_config.data.background_color);
-    var typing_font_color: rl.Color = rl.Color.fromInt(app_config.data.typing_font_color);
-    var key_tint_color: rl.Color = rl.Color.fromInt(app_config.data.key_tint_color);
-
-    var key_press_effect = KeyPressEffect.fromString(app_config.data.key_press_effect) orelse KeyPressEffect.move;
-
     var config_watch = try Watch.init(config_path);
     defer config_watch.deinit();
 
-    var layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
-
-    app_state = blk: {
-        const layout_path = app_config.data.layout_path;
-        break :blk try getState(allocator, config_dir, layout_path, layout, &app_config.data);
-    };
-    defer app_state.deinit();
+    app_state = try getState(allocator, config_dir, app_config.data);
 
     // window creation
 
@@ -804,15 +803,7 @@ pub fn main() !void {
                     updateWindowPos(app_config.data.window_position_x, app_config.data.window_position_y);
                 },
                 .layout_path, .layout_preset, .key_scale => {
-                    const layout_path = app_config.data.layout_path;
-                    layout = Layout.fromString(app_config.data.layout_preset) orelse Layout.tkl_ansi;
-                    if (layout_path.len != 0) {
-                        std.debug.print("Reload layout using file '{s}'\n", .{layout_path});
-                    } else {
-                        std.debug.print("Reload layout using preset '{s}'\n", .{@tagName(layout)});
-                    }
-                    if (getState(allocator, config_dir, app_config.data.layout_path, layout, &app_config.data)) |new_state| {
-                        app_state.deinit();
+                    if (getState(allocator, config_dir, app_config.data)) |new_state| {
                         app_state = new_state;
                         rl.setWindowSize(app_state.window_width, app_state.window_height);
                         // TODO: update window position when layout changed, probably should add
@@ -838,14 +829,14 @@ pub fn main() !void {
                         std.debug.print("Got unrecognized theme: '{s}', reload aborted\n", .{app_config.data.theme});
                     }
                 },
-                .background_color => background_color = rl.Color.fromInt(app_config.data.background_color),
-                .typing_font_color => typing_font_color = rl.Color.fromInt(app_config.data.typing_font_color),
-                .key_tint_color => key_tint_color = rl.Color.fromInt(app_config.data.key_tint_color),
+                inline .background_color, .typing_font_color, .key_tint_color => |color| {
+                    app_state.updateColor(@tagName(color), app_config.data);
+                },
                 .key_press_effect => {
-                    if (KeyPressEffect.fromString(app_config.data.key_press_effect)) |new_press_effect| {
-                        key_press_effect = new_press_effect;
+                    if (KeyPressEffect.fromString(app_config.data.key_press_effect)) |value| {
+                        app_state.key_press_effect = value;
                     } else {
-                        std.debug.print("Got unrecognized key_press_effect value: '{s}', fallback to default\n", .{app_config.data.key_press_effect});
+                        app_state.key_press_effect = KeyPressEffect.move;
                     }
                 },
                 else => {},
@@ -906,13 +897,13 @@ pub fn main() !void {
         }
 
         rl.beginDrawing();
-        rl.clearBackground(background_color);
+        rl.clearBackground(app_state.background_color);
 
         const rot = rl.Vector2{ .x = 0, .y = 0 };
 
         for (app_state.key_states) |k| {
             var dst = k.dst;
-            if (k.pressed) switch(key_press_effect) {
+            if (k.pressed) switch(app_state.key_press_effect) {
                 .move => dst.y += app_state.key_pressed_travel,
                 .squash => {
                     dst.height -= app_state.key_pressed_travel;
@@ -920,7 +911,7 @@ pub fn main() !void {
                 },
                 else => {},
             };
-            const tint = if (k.pressed) key_tint_color else rl.Color.white;
+            const tint = if (k.pressed) app_state.key_tint_color else rl.Color.white;
             rl.drawTexturePro(keycap_texture, k.src, dst, rot, k.angle, tint);
         }
 
@@ -945,7 +936,7 @@ pub fn main() !void {
                     @as(f32, @floatFromInt(@divTrunc(app_state.window_width, 2))) - offset,
                     @floatFromInt(@divTrunc(app_state.window_height - typing_font_size, 2)),
                 );
-                rl.drawTextCodepoint(font, cp, glyph_position, @floatFromInt(typing_font_size), typing_font_color);
+                rl.drawTextCodepoint(font, cp, glyph_position, @floatFromInt(typing_font_size), app_state.typing_font_color);
 
                 offset += switch (font.glyphs[glyph_index].advanceX) {
                     0 => font.recs[glyph_index].width * scale_factor,
