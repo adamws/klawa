@@ -179,6 +179,7 @@ def __get_parameters():
         "custom-keycap-asset",
         "customized-pok3r-theme",
         "custom-split-layout",
+        "no-keyboard-visualization",
     ]
     test_params = []
     # not interested in all combinations
@@ -189,6 +190,7 @@ def __get_parameters():
     test_params.append(pytest.param(texts[0], examples[2]))
     test_params.append(pytest.param(texts[0], examples[3]))
     test_params.append(pytest.param(texts[1], examples[4]))
+    test_params.append(pytest.param(texts[0], examples[5]))
 
     return test_params
 
