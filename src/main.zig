@@ -80,6 +80,15 @@ pub const KeyPressEffect = enum {
     }
 };
 
+pub const BackspaceMode = enum {
+    normal, // always insert backspace symbol
+    full,
+
+    pub fn fromString(value: []const u8) ?BackspaceMode {
+        return std.meta.stringToEnum(BackspaceMode, value);
+    }
+};
+
 const ConfigData = struct {
     window_undecorated: bool = true,
     window_transparent: bool = false,
@@ -103,6 +112,7 @@ const ConfigData = struct {
     key_scale: f32 = 1.0,
     key_tint_color: u32 = 0xff0000ff, // alpha=1
     key_press_effect: []const u8 = "move",
+    backspace_mode: []const u8 = "normal",
 };
 
 const KeyOnScreen = struct {
@@ -114,7 +124,6 @@ const KeyOnScreen = struct {
 
 pub const KeyData = extern struct {
     pressed: bool,
-    repeated: bool,
     keycode: u8,
     keysym: c_ulong,
     string: [32]u8,
@@ -125,37 +134,106 @@ pub const KeyData = extern struct {
     }
 };
 
-const CodepointBuffer = struct {
-    write_index: Index = 0,
-    data: [capacity]i32 = .{0} ** capacity,
+fn CodepointBuffer(comptime capacity: comptime_int, comptime T: type) type {
+    return struct {
+        write_index: Index = 0,
+        data: [capacity]T = .{0} ** capacity,
 
-    const capacity = 32; // must be power of 2
-    const IndexBits = std.math.log2_int(usize, capacity);
-    const Index = std.meta.Int(.unsigned, IndexBits);
+        comptime {
+            std.debug.assert(std.math.isPowerOfTwo(capacity));
+        }
+        const IndexBits = std.math.log2_int(usize, capacity);
+        const Index = std.meta.Int(.unsigned, IndexBits);
+        const Self = @This();
 
-    pub fn push(self: *CodepointBuffer, value: i32) void {
-        self.data[self.write_index] = value;
-        self.write_index = self.write_index +% 1;
-    }
+        fn push(self: *Self, value: T) void {
+            self.data[self.write_index] = value;
+            self.write_index = self.write_index +% 1;
+        }
 
-    pub const Iterator = struct {
-        queue: *CodepointBuffer,
-        count: Index,
+        fn pop(self: *Self) T {
+            self.write_index = self.write_index -% 1;
+            const value = self.data[self.write_index];
+            self.data[self.write_index] = 0;
+            return value;
+        }
 
-        pub fn next(it: *Iterator) ?i32 {
-            it.count = it.count -% 1;
-            if (it.count == it.queue.write_index) return null;
-            const cp = it.queue.data[it.count];
-            if (cp == 0) return null;
-            return cp;
+        pub const Iterator = struct {
+            queue: *Self,
+            count: Index,
+
+            pub fn next(it: *Iterator) ?T {
+                it.count = it.count -% 1;
+                if (it.count == it.queue.write_index) return null;
+                const cp = it.queue.data[it.count];
+                if (cp == 0) return null;
+                return cp;
+            }
+        };
+
+        pub fn iterator(self: *Self) Iterator {
+            return Iterator{
+                .queue = self,
+                .count = self.write_index,
+            };
         }
     };
+}
 
-    pub fn iterator(self: *CodepointBuffer) Iterator {
-        return Iterator{
-            .queue = self,
-            .count = self.write_index,
-        };
+const TypingDisplay = struct {
+    codepoints_buffer: CodepointBuffer(capacity, i32) = .{},
+    widths: CodepointBuffer(capacity, usize) = .{},
+
+    const capacity = 256;
+
+    pub fn update(self: *TypingDisplay, key: KeyData, backspace_mode: BackspaceMode) void {
+        const symbol = backend.keysymToString(key.keysym);
+        if (symbol == null) return;
+
+        const symbol_slice = std.mem.sliceTo(symbol, 0);
+
+        if (backspace_mode == .full and std.mem.eql(u8, symbol_slice, "BackSpace")) {
+            for (self.widths.pop()) |_| {
+                _ = self.codepoints_buffer.pop();
+            }
+        } else {
+            var text_: [*:0]const u8 = undefined;
+
+            if (symbols_lookup.get(symbol_slice)) |lookup| {
+                std.debug.print("Replacement: '{s}'\n", .{lookup});
+                text_ = lookup;
+            } else {
+                text_ = @ptrCast(&key.string);
+            }
+
+            if (rl.loadCodepoints(text_)) |codepoints_| {
+                self.widths.push(codepoints_.len);
+                for (codepoints_) |cp| {
+                    self.codepoints_buffer.push(cp);
+                }
+            } else |_| {}
+        }
+    }
+
+    pub fn render(self: *TypingDisplay, font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color) void {
+        var offset: f32 = 0;
+        var it = self.codepoints_buffer.iterator();
+
+        const scale_factor: f32 = font_size / @as(f32, @floatFromInt(font.baseSize));
+
+        while (it.next()) |cp| {
+            const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
+            const glyph_position = rl.Vector2.init(
+                position.x - offset,
+                position.y,
+            );
+            rl.drawTextCodepoint(font, cp, glyph_position, font_size, tint);
+
+            offset += switch (font.glyphs[glyph_index].advanceX) {
+                0 => font.recs[glyph_index].width * scale_factor,
+                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
+            };
+        }
     }
 };
 
@@ -230,6 +308,7 @@ pub const AppState = struct {
     typing_font_color: rl.Color,
     typing_background_color: rl.Color,
     key_tint_color: rl.Color,
+    backspace_mode: BackspaceMode,
     keys: Queue = Queue.init(),
     last_char_timestamp: i64 = 0,
 
@@ -255,6 +334,7 @@ pub const AppState = struct {
             .typing_font_color = rl.Color.fromInt(config_data.typing_font_color),
             .typing_background_color = rl.Color.fromInt(config_data.typing_background_color),
             .key_tint_color = rl.Color.fromInt(config_data.key_tint_color),
+            .backspace_mode = BackspaceMode.fromString(config_data.backspace_mode) orelse BackspaceMode.normal,
         };
 
         calcualteWindoWize(&self, keys);
@@ -755,7 +835,7 @@ pub fn main() !void {
 
     const typing_persistance_sec = 2;
 
-    var codepoints_buffer = CodepointBuffer{};
+    var typing_display = TypingDisplay{};
 
     var drag_reference_position = rl.getWindowPosition();
 
@@ -860,6 +940,13 @@ pub fn main() !void {
                         app_state.key_press_effect = KeyPressEffect.move;
                     }
                 },
+                .backspace_mode => {
+                    if (BackspaceMode.fromString(app_config.data.backspace_mode)) |value| {
+                        app_state.backspace_mode = value;
+                    } else {
+                        app_state.backspace_mode = BackspaceMode.normal;
+                    }
+                },
                 else => {},
             };
         }
@@ -895,26 +982,7 @@ pub fn main() !void {
             }
 
             app_state.updateKeyStates(@intCast(k.keycode), k.pressed);
-
-            const symbol = backend.keysymToString(k.keysym);
-            if (symbol == null) continue;
-            std.debug.print("Consumed: '{s}'\n", .{symbol});
-
-            var text_: [*:0]const u8 = undefined;
-
-            if (symbols_lookup.get(std.mem.sliceTo(symbol, 0))) |lookup| {
-                std.debug.print("Replacement: '{s}'\n", .{lookup});
-                text_ = lookup;
-            } else {
-                text_ = @ptrCast(&k.string);
-            }
-
-            if (rl.loadCodepoints(text_)) |codepoints_| {
-                for (codepoints_) |cp| {
-                    codepoints_buffer.push(cp);
-                    std.debug.print("codepoints: '{any}'\n", .{codepoints_buffer});
-                }
-            } else |_| {}
+            typing_display.update(k, app_state.backspace_mode);
         }
 
         rl.beginDrawing();
@@ -941,33 +1009,17 @@ pub fn main() !void {
         if (app_state.show_typing and
             std.time.timestamp() - app_state.last_char_timestamp <= typing_persistance_sec) {
 
-            const typing_y_pos: i32 = @divTrunc(app_state.window_height - app_state.typing_font_size, 2);
+            const typing_x_pos: f32 = @floatFromInt(@divTrunc(app_state.window_width, 2));
+            const typing_y_pos: f32 = @floatFromInt(@divTrunc(app_state.window_height - app_state.typing_font_size, 2));
             rl.drawRectangle(
                 0,
-                typing_y_pos,
+                @intFromFloat(typing_y_pos),
                 app_state.window_width,
                 app_state.typing_font_size,
                 app_state.typing_background_color,
             );
 
-            var offset: f32 = 0;
-            var it = codepoints_buffer.iterator();
-
-            const scale_factor: f32 = @as(f32, @floatFromInt(app_state.typing_font_size)) / @as(f32, @floatFromInt(font.baseSize));
-
-            while (it.next()) |cp| {
-                const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
-                const glyph_position = rl.Vector2.init(
-                    @as(f32, @floatFromInt(@divTrunc(app_state.window_width, 2))) - offset,
-                    @floatFromInt(typing_y_pos),
-                );
-                rl.drawTextCodepoint(font, cp, glyph_position, @floatFromInt(app_state.typing_font_size), app_state.typing_font_color);
-
-                offset += switch (font.glyphs[glyph_index].advanceX) {
-                    0 => font.recs[glyph_index].width * scale_factor,
-                    else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
-                };
-            }
+            typing_display.render(font, rl.Vector2.init(typing_x_pos, typing_y_pos), @floatFromInt(app_state.typing_font_size), app_state.typing_font_color);
         }
 
         // button for closing application when window decorations disabled,
