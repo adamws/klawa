@@ -20,6 +20,7 @@ pub fn CountingStringRingBuffer(comptime capacity: comptime_int, comptime max_st
 
         pub fn push(self: *Self, string: []const u8) !void {
             if (string.len > max_string_len) return error.StringTooLong;
+            if (string.len == 0) return;
 
             const last_index = self.write_index -% 1;
             const last_string = self.strings[last_index][0..self.lengths[last_index]];
@@ -87,6 +88,7 @@ test "counting string buffer" {
     try buffer.push("abc");
     try buffer.push("def");
     try buffer.push("def");
+    try buffer.push(""); // empty strings are ignored
 
     var it = buffer.reverse_iterator();
     try testing.expectEqualDeep(RepeatedStrig{ .repeat = 2, .string = "def" }, it.next().?);
