@@ -182,12 +182,17 @@ const TypingDisplay = struct {
         var codepoints: [max_string_len]u21 = undefined;
         var num_codepoints: usize = 0;
 
+        const index_of_w: usize = @intCast(rl.getGlyphIndex(font, 'w'));
+        const wide_glyph_width = 2 * font.recs[index_of_w].width;
+
         var offset: f32 = 0;
         var it = self.string_buffer.reverse_iterator();
 
         while (it.next()) |repeated_string| {
-            var repeat = repeated_string.repeat;
+            // to avoid iterating over characters which won't fit in screen anyway
+            if (position.x - offset + wide_glyph_width < 0) break;
 
+            var repeat = repeated_string.repeat;
             if (repeat > repeat_indicator_threshold)
             {
                 var buf: [max_repeat_indicator.len]u8 = undefined;
