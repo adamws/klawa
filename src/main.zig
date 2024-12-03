@@ -23,6 +23,7 @@ const backend = switch (builtin.target.os.tag) {
 const labels_lookup = @import("layout_labels.zig").labels_lookup;
 const symbols_lookup = @import("symbols_lookup.zig").symbols_lookup;
 
+const CountingStringRingBuffer = @import("strings.zig").CountingStringRingBuffer;
 const Ffmpeg = @import("ffmpeg.zig").Ffmpeg;
 const Layout = @import("layout.zig").Layout;
 const SpscQueue = @import("spsc_queue.zig").SpscQueue;
@@ -134,102 +135,103 @@ pub const KeyData = extern struct {
     }
 };
 
-fn CodepointBuffer(comptime capacity: comptime_int, comptime T: type) type {
-    return struct {
-        write_index: Index = 0,
-        data: [capacity]T = .{0} ** capacity,
-
-        comptime {
-            std.debug.assert(std.math.isPowerOfTwo(capacity));
-        }
-        const IndexBits = std.math.log2_int(usize, capacity);
-        const Index = std.meta.Int(.unsigned, IndexBits);
-        const Self = @This();
-
-        fn push(self: *Self, value: T) void {
-            self.data[self.write_index] = value;
-            self.write_index = self.write_index +% 1;
-        }
-
-        fn pop(self: *Self) T {
-            self.write_index = self.write_index -% 1;
-            const value = self.data[self.write_index];
-            self.data[self.write_index] = 0;
-            return value;
-        }
-
-        pub const Iterator = struct {
-            queue: *Self,
-            count: Index,
-
-            pub fn next(it: *Iterator) ?T {
-                it.count = it.count -% 1;
-                if (it.count == it.queue.write_index) return null;
-                const cp = it.queue.data[it.count];
-                if (cp == 0) return null;
-                return cp;
-            }
-        };
-
-        pub fn iterator(self: *Self) Iterator {
-            return Iterator{
-                .queue = self,
-                .count = self.write_index,
-            };
-        }
-    };
-}
-
 const TypingDisplay = struct {
-    codepoints_buffer: CodepointBuffer(capacity, i32) = .{},
-    widths: CodepointBuffer(capacity, usize) = .{},
+    string_buffer: CountingStringRingBuffer(capacity, max_string_len) = .{},
 
-    const capacity = 256;
+    const capacity = 256; // size of key representations history
+    const max_string_len = 32; // maximal length of string representation of key (or key combo)
+    const repeat_indicator_threshold = 3;
+    const max_repeat = std.math.maxInt(usize);
+    const max_repeat_indicator = std.fmt.comptimePrint("…{}×", .{max_repeat});
 
     pub fn update(self: *TypingDisplay, key: KeyData, backspace_mode: BackspaceMode) void {
-        const symbol = backend.keysymToString(key.keysym);
+        const symbol = keySymbol(key);
         if (symbol == null) return;
 
-        const symbol_slice = std.mem.sliceTo(symbol, 0);
+        std.debug.print("Symbol: {s}\n", .{symbol.?});
 
-        if (backspace_mode == .full and std.mem.eql(u8, symbol_slice, "BackSpace")) {
-            for (self.widths.pop()) |_| {
-                _ = self.codepoints_buffer.pop();
-            }
+        if (key.pressed == false) return;
+
+        if (backspace_mode == .full and std.mem.eql(u8, symbol.?, "BackSpace")) {
+            self.string_buffer.backspace();
         } else {
-            var text_: [*:0]const u8 = undefined;
-
-            if (symbols_lookup.get(symbol_slice)) |lookup| {
-                std.debug.print("Replacement: '{s}'\n", .{lookup});
-                text_ = lookup;
-            } else {
-                text_ = @ptrCast(&key.string);
-            }
-
-            if (rl.loadCodepoints(text_)) |codepoints_| {
-                self.widths.push(codepoints_.len);
-                for (codepoints_) |cp| {
-                    self.codepoints_buffer.push(cp);
-                }
-            } else |_| {}
+            self.push(key, symbol.?);
         }
     }
 
-    pub fn render(self: *TypingDisplay, font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color) void {
-        var offset: f32 = 0;
-        var it = self.codepoints_buffer.iterator();
+    fn push(self: *TypingDisplay, key: KeyData, key_symbol: [:0]const u8) void {
+        var text_: [*:0]const u8 = undefined;
 
+        if (symbols_lookup.get(key_symbol)) |lookup| {
+            std.debug.print("Replacement: '{s}'\n", .{lookup});
+            text_ = lookup;
+        } else {
+            text_ = @ptrCast(&key.string);
+        }
+        self.string_buffer.push(std.mem.sliceTo(text_, 0)) catch unreachable;
+    }
+
+    fn keySymbol(key: KeyData) ?[:0]const u8 {
+        if (backend.keysymToString(key.keysym)) |symbol| {
+            return std.mem.sliceTo(symbol, 0);
+        }
+        return null;
+    }
+
+    pub fn render(self: *TypingDisplay, font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color) void {
+        var codepoints: [max_string_len]u21 = undefined;
+        var num_codepoints: usize = 0;
+
+        var offset: f32 = 0;
+        var it = self.string_buffer.reverse_iterator();
+
+        while (it.next()) |repeated_string| {
+            var repeat = repeated_string.repeat;
+
+            if (repeat > repeat_indicator_threshold)
+            {
+                var buf: [max_repeat_indicator.len]u8 = undefined;
+                const res = std.fmt.bufPrintZ(&buf, "…{}×", .{repeat}) catch max_repeat_indicator;
+
+                num_codepoints = get_codepoints(res, &codepoints);
+                render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+
+                repeat = repeat_indicator_threshold;
+            }
+
+            num_codepoints = get_codepoints(repeated_string.string, &codepoints);
+            for (0..repeat) |_| {
+                render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+            }
+        }
+    }
+
+    fn get_codepoints(string: []const u8, output: []u21) usize {
+        var utf8 = std.unicode.Utf8View.initUnchecked(string).iterator();
+        var i: usize = 0;
+        while (utf8.nextCodepoint()) |cp| {
+            if (i >= output.len) break;
+            output[i] = cp;
+            i += 1;
+        }
+        return i;
+    }
+
+    fn render_codepoints(font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color, codepoints: []u21, offset: *f32) void {
         const scale_factor: f32 = font_size / @as(f32, @floatFromInt(font.baseSize));
 
-        while (it.next()) |cp| {
+        var i: usize = codepoints.len;
+        while (i > 0) {
+            i -= 1;
+            const cp: i32 = @intCast(codepoints[i]);
             const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
             const glyph_position = rl.Vector2.init(
-                position.x - offset,
+                position.x - offset.*,
                 position.y,
             );
             rl.drawTextCodepoint(font, cp, glyph_position, font_size, tint);
 
-            offset += switch (font.glyphs[glyph_index].advanceX) {
+            offset.* += switch (font.glyphs[glyph_index].advanceX) {
                 0 => font.recs[glyph_index].width * scale_factor,
                 else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
             };
@@ -285,7 +287,7 @@ pub var app_state: AppState = undefined;
 // https://github.com/bits/UTF-8-Unicode-Test-Documents/blob/master/UTF-8_sequence_unseparated/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt
 const text = @embedFile("resources/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt");
 
-const symbols = "↚↹⏎␣⌫↑←→↓ᴷᴾ⏎";
+const symbols = "↚↹⏎␣⌫↑←→↓ᴷᴾ⏎…×";
 const all_text = text ++ symbols;
 
 // it contains all current sumstitutions symbols:
