@@ -160,11 +160,27 @@ def run_process_capture_logs(command, cwd, name="", process_holder=None) -> None
     process.wait()
 
 
-def run_typing_process(text: str) -> None:
+def run_typing_process(text: str | list[str]) -> None:
     if sys.platform == "win32":
-        ahk.send(text, key_delay=200, key_press_duration=50, send_mode="Event");
+        if isinstance(text, str):
+            ahk.send(text, key_delay=200, key_press_duration=50, send_mode="Event")
+        else:
+            text_escaped = ""
+            for item in text:
+                if item == "BackSpace":
+                    text_escaped += "{Backspace}"
+                elif item == "ctrl+alt+b":
+                    text_escaped += "^!b"
+                elif item == "ctrl+b":
+                    text_escaped += "^b"
+                else:
+                    text_escaped += item
+            ahk.send_input(text_escaped)
     else:
-        result = subprocess.run(["xdotool", "type", "--delay", "200", text])
+        if isinstance(text, str):
+            result = subprocess.run(["xdotool", "type", "--delay", "200", text])
+        else:
+            result = subprocess.run(["xdotool", "key", "--delay", "200"] + text)
         assert result.returncode == 0
 
 
@@ -172,6 +188,8 @@ def __get_parameters():
     texts = [
         "The quick brown fox jumps over the lazy dog",
         "Dość błazeństw, żrą mój pęk luźnych fig",
+        # for testing key combinations, counting repetitions and backspace
+        11 * ["a"] + ["b", "BackSpace"] + 4 * ["b"] + 4 * ["ctrl+alt+b"] + 4 * ["ctrl+b"] + 23 * ["BackSpace"]
     ]
     examples = [
         "", # default
@@ -187,6 +205,7 @@ def __get_parameters():
     test_params.append(pytest.param(texts[0], examples[0]))
     test_params.append(pytest.param(texts[1], examples[0]))
     test_params.append(pytest.param(texts[0], examples[1]))
+    test_params.append(pytest.param(texts[2], examples[1]))
     test_params.append(pytest.param(texts[0], examples[2]))
     test_params.append(pytest.param(texts[0], examples[3]))
     test_params.append(pytest.param(texts[1], examples[4]))
@@ -198,7 +217,7 @@ def __get_parameters():
 @pytest.mark.parametrize(
     "text,example", __get_parameters()
 )
-def test_record_and_render(app_isolation, text: str, example) -> None:
+def test_record_and_render(app_isolation, text: str | list[str], example) -> None:
     with app_isolation(example) as app:
         app_dir = Path(app).parent
         processes = {}
