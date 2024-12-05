@@ -1,15 +1,4 @@
-#
-# window settings
-#
-
-window_undecorated = true
-window_transparent = false
 background_color = 0x282828ff
-
-#
-# appearance
-#
-
 show_typing = false
 
 theme = custom_from_keycap
@@ -19,4 +8,3 @@ key_press_effect = squash
 
 key_tint_color = 0xffffffff
 layout_preset = 60_iso
-draw_fps = false

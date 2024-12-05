@@ -1,21 +1,8 @@
-#
-# window settings
-#
-
-window_undecorated = true
-window_transparent = false
-background_color = 0x000000ff
-
-#
-# appearance
-#
-
 show_typing = true
 typing_font_size = 100
 
 typing_font_color = 0xffffffff ; white
 key_tint_color = 0xffffffff
-draw_fps = false
 
 # This is important part of this config.
 # The 'custom' theme indicates that 'atlas.png' with following mapping is used.
