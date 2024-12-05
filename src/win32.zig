@@ -23,7 +23,9 @@ var hook: ?c.HHOOK = null;
 fn keyEventToString(vk: u32, scan_code: u32, string: []u8) !void {
     var keyboard_state: [256]u8 = .{0} ** 256;
 
-    const modifiers = [_]c_int{c.VK_SHIFT, c.VK_MENU, c.VK_CONTROL};
+    // intentionally ignore c.VK_CONTROL (modifiers are tracked in upper layer), makes it
+    // easier to display Ctrl+ key combos
+    const modifiers = [_]c_int{c.VK_SHIFT, c.VK_MENU};
 
     for (modifiers) |m| {
         const value: c_short = c.GetKeyState(m);
@@ -44,22 +46,24 @@ fn lowLevelKeyboardProc(nCode: c.INT, wParam: c.WPARAM, lParam: c.LPARAM) callco
         var key: KeyData = std.mem.zeroInit(KeyData, .{});
         key.keycode = @intCast(keyboard.vkCode);
 
+        keyEventToString(keyboard.vkCode, keyboard.scanCode, &key.string) catch {};
+        const extended: bool = ((keyboard.flags & c.LLKHF_EXTENDED) != 0);
+
+        var index = @as(c_ulong, @intCast(keyboard.scanCode));
+        if (extended) index += 0x100;
+        if (index >= kbd_en_vscname.len) {
+            index = 0;
+        }
+        key.keysym = index;
+
         if (wParam == c.WM_KEYDOWN or wParam == c.WM_SYSKEYDOWN) {
             key.pressed = true;
 
-            app_state_l.last_char_timestamp = std.time.timestamp();
-            keyEventToString(keyboard.vkCode, keyboard.scanCode, &key.string) catch {};
-            const extended: bool = ((keyboard.flags & c.LLKHF_EXTENDED) != 0);
-
-            var index = @as(c_ulong, @intCast(keyboard.scanCode));
-            if (extended) index += 0x100;
-            if (index >= kbd_en_vscname.len) {
-                index = 0;
+            if (key.string[0] != 0) {
+                // update only for keys which produce output,
+                // this will not include modifiers
+                app_state_l.last_char_timestamp = std.time.timestamp();
             }
-            key.keysym = index;
-            std.debug.print("Pressed vk: '{}', scancode: '{}' extended: {}, string: '{s}', symbol: '{}'\n", .{
-                keyboard.vkCode, keyboard.scanCode, extended, std.mem.sliceTo(&key.string, 0), key.keysym
-            });
         } else {
             key.pressed = false;
         }
@@ -106,9 +110,9 @@ pub fn keysymToString(keysym: c_ulong) [*c]const u8 {
 const kbd_en_vscname = [_][]const u8 {
     // zig fmt: off
     "", "Escape", "", "", "", "", "", "", "", "", "", "", "", "", "BackSpace", "Tab",
-    "", "", "", "", "", "", "", "", "", "", "", "", "Return", "Ctrl", "", "",
-    "", "", "", "", "", "", "", "", "", "", "Shift", "", "", "", "", "",
-    "", "", "", "", "", "", "Right Shift", "KP_Multiply", "Alt", "space", "Caps_Lock", "F1", "F2", "F3", "F4", "F5",
+    "", "", "", "", "", "", "", "", "", "", "", "", "Return", "Control_L", "", "",
+    "", "", "", "", "", "", "", "", "", "", "Shift_L", "", "", "", "", "",
+    "", "", "", "", "", "", "Shift_R", "KP_Multiply", "Alt_L", "space", "Caps_Lock", "F1", "F2", "F3", "F4", "F5",
     "F6", "F7", "F8", "F9", "F10", "Pause", "Scroll_Lock", "KP_7", "KP_8", "KP_9", "KP_Subtract", "KP_4", "KP_5", "KP_6", "KP_Add", "KP_1",
     "KP_2", "KP_3", "KP_0", "KP_Separator", "Sys Req", "", "", "F11", "F12", "", "", "", "", "", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
@@ -123,9 +127,9 @@ const kbd_en_vscname = [_][]const u8 {
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     // extended
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "", "", "", "", "KP_Enter", "Right Ctrl", "", "",
+    "", "", "", "", "", "", "", "", "", "", "", "", "KP_Enter", "Control_R", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "KP_Divide", "", "Print", "Right Alt", "", "", "", "", "", "", "",
+    "", "", "", "", "", "KP_Divide", "", "Print", "Alt_R", "", "", "", "", "", "", "",
     "", "", "", "", "", "Num_Lock", "Break", "Home", "Up", "Prior", "", "Left", "", "Right", "", "End",
     "Down", "Next", "Insert", "Delete", "<00>", "", "Help", "", "", "", "", "Super_L", "Super_R", "Application", "", "",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",

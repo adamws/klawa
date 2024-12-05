@@ -127,7 +127,7 @@ pub const KeyData = extern struct {
     pressed: bool,
     keycode: u8,
     keysym: c_ulong,
-    string: [32]u8,
+    string: [16]u8,
 
     comptime {
         // this type is is copied a lot, keep it small
@@ -135,8 +135,54 @@ pub const KeyData = extern struct {
     }
 };
 
+const Modifier = enum {
+    ctrl,
+    alt,
+    super,
+    hyper,
+    shift,
+    alt_gr,
+
+    // order determines the order of concatenation when constructing pressed key combo string
+
+    const ModifierLookupKV = struct { []const u8, Modifier };
+    const lookup_slice = [_]ModifierLookupKV{
+        // zig fmt: off
+        .{ "Control_L",        .ctrl   }, .{ "Control_R", .ctrl  },
+        .{ "Alt_L",            .alt    }, .{ "Alt_R",     .alt   }, .{ "Meta_L", .alt }, .{ "Meta_R", .alt },
+        .{ "Super_L",          .super  }, .{ "Super_R",   .super },
+        .{ "Hyper_L",          .hyper  }, .{ "Hyper_R",   .hyper },
+        .{ "Shift_L",          .shift  }, .{ "Shift_R",   .shift },
+        .{ "ISO_Level3_Shift", .alt_gr },
+        // zig fmt: on
+    };
+    const lookup = std.StaticStringMap(Modifier).initComptime(lookup_slice);
+
+    pub fn fromKeySymbol(value: []const u8) ?Modifier {
+        // Ignore Alt_R on windows, otherwise polish diacritics will be displayed like this: `Alt+ą`.
+        // On linux it works ok because right alt is reported as `ISO_Level3_Shift`
+        // for which we do not define prefix. This might be a problem with keyboard layout handling.
+        if (builtin.target.os.tag == .windows and std.mem.eql(u8, value, "Alt_R")) return null;
+        return lookup.get(value);
+    }
+
+    pub fn prefix(self: Modifier) []const u8 {
+        return switch (self) {
+            .ctrl => "Ctrl+",
+            .alt => "Alt+",
+            .super => "Super+",
+            .hyper => "Hyper+",
+            .shift => "",
+            .alt_gr => "",
+        };
+    }
+};
+
 const TypingDisplay = struct {
     string_buffer: CountingStringRingBuffer(capacity, max_string_len) = .{},
+    active_modifiers: Modifiers = Modifiers.initEmpty(),
+
+    const Modifiers = std.EnumSet(Modifier);
 
     const capacity = 256; // size of key representations history
     const max_string_len = 32; // maximal length of string representation of key (or key combo)
@@ -145,36 +191,60 @@ const TypingDisplay = struct {
     const max_repeat_indicator = std.fmt.comptimePrint("…{}×", .{max_repeat});
 
     pub fn update(self: *TypingDisplay, key: KeyData, backspace_mode: BackspaceMode) void {
-        const symbol = keySymbol(key);
-        if (symbol == null) return;
+        const symbol = keySymbol(key) orelse return;
+        std.debug.print("Symbol: {s}\n", .{symbol});
 
-        std.debug.print("Symbol: {s}\n", .{symbol.?});
+        if (Modifier.fromKeySymbol(symbol)) |modifier| {
+            self.active_modifiers.setPresent(modifier, key.pressed);
+        }
 
         if (key.pressed == false) return;
 
-        if (backspace_mode == .full and std.mem.eql(u8, symbol.?, "BackSpace")) {
+        if (backspace_mode == .full and std.mem.eql(u8, symbol, "BackSpace")) {
             self.string_buffer.backspace();
         } else {
-            self.push(key, symbol.?);
+            self.push(key, symbol);
         }
     }
 
     fn push(self: *TypingDisplay, key: KeyData, key_symbol: [:0]const u8) void {
-        var text_: [*:0]const u8 = undefined;
+        var index: usize = 0;
+        var string: [max_string_len]u8 = .{0} ** max_string_len;
 
+        inline for (@typeInfo(Modifier).Enum.fields) |enumField| {
+            const modifier: Modifier = @enumFromInt(enumField.value);
+            if (self.active_modifiers.contains(modifier)) {
+                const prefix = modifier.prefix();
+                std.mem.copyForwards(u8, string[index..string.len], prefix);
+                index += prefix.len;
+            }
+        }
+
+        const tmp = index;
         if (symbols_lookup.get(key_symbol)) |lookup| {
             std.debug.print("Replacement: '{s}'\n", .{lookup});
-            text_ = lookup;
+            std.mem.copyForwards(u8, string[index..string.len], lookup);
+            index += lookup.len;
         } else {
-            text_ = @ptrCast(&key.string);
+            var j: usize = 0;
+            while(key.string[j] != 0) : ({ index += 1; j += 1; }) {
+                string[index] = key.string[j];
+            }
         }
-        self.string_buffer.push(std.mem.sliceTo(text_, 0)) catch unreachable;
+        std.debug.assert(index < max_string_len);
+
+        // check if anything has been appended to string buffer,
+        // avoids displaying only modifiers
+        if (tmp != index) {
+            self.string_buffer.push(string[0..index]) catch unreachable;
+        }
     }
 
     fn keySymbol(key: KeyData) ?[:0]const u8 {
         if (backend.keysymToString(key.keysym)) |symbol| {
             return std.mem.sliceTo(symbol, 0);
         }
+        std.debug.print("No Symbol for {any}\n", .{key});
         return null;
     }
 

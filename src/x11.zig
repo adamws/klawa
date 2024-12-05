@@ -58,7 +58,8 @@ const X11InputContext = struct {
         self: *X11InputContext,
         device_event: *const x11.XIDeviceEvent,
         key_data: *KeyData,
-    ) c_int {
+    ) void {
+        var buf: [16]u8 = .{0} ** 16;
         var e: x11.XKeyPressedEvent = std.mem.zeroInit(
             x11.XKeyPressedEvent,
             .{
@@ -74,12 +75,19 @@ const X11InputContext = struct {
         const len = x11.Xutf8LookupString(
             self.xic,
             &e,
-            &key_data.string,
-            32,
+            &buf,
+            buf.len,
             &key_data.keysym,
             &status,
         );
-        return len;
+
+        if (len != x11.NoSymbol) {
+            switch(key_data.keysym) {
+                // avoid ctrl sequences, just take the character value
+                32...126 => key_data.string[0] = @truncate(key_data.keysym),
+                else => std.mem.copyForwards(u8, &key_data.string, &buf),
+            }
+        }
     }
 };
 
@@ -169,10 +177,10 @@ pub fn listener(app_state: *AppState, window_handle: *anyopaque) !void {
 
                     var key: KeyData = std.mem.zeroInit(KeyData, .{});
                     key.keycode = keycode;
+                    input_ctx.lookupString(device_event, &key);
 
                     if (cookie.evtype == x11.XI_KeyPress) {
                         key.pressed = true;
-                        _ = input_ctx.lookupString(device_event, &key);
 
                         if (key.string[0] != 0) {
                             // update only for keys which produce output,

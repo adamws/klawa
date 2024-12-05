@@ -2,6 +2,7 @@ const std = @import("std");
 
 const SymbolsLookupKV = struct { []const u8, [:0]const u8 };
 // TODO: symbols subsitution should be configurable
+// TODO: should check if there are no too long lookups (currently max 16)
 const symbols_lookup_slice = [_]SymbolsLookupKV{
     // zig fmt: off
     .{ "Escape",       "Esc"     },
@@ -68,3 +69,4 @@ const symbols_lookup_slice = [_]SymbolsLookupKV{
     // zig fmt: on
 };
 pub const symbols_lookup = std.StaticStringMap([:0]const u8).initComptime(symbols_lookup_slice);
+
