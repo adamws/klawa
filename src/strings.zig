@@ -36,6 +36,17 @@ pub fn CountingStringRingBuffer(comptime capacity: comptime_int, comptime max_st
             }
         }
 
+        pub fn reset(self: *Self) void {
+            self.write_index = 0;
+            clearEntry(self, self.write_index);
+            clearEntry(self, self.write_index -% 1);
+        }
+
+        fn clearEntry(self: *Self, index: Index) void {
+            self.lengths[index] = 0;
+            self.repeats[index] = 0;
+        }
+
         pub fn backspace(self: *Self) void {
             const last_index = self.write_index -% 1;
             const last_repeats = self.repeats[last_index];

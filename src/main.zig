@@ -99,6 +99,7 @@ const ConfigData = struct {
     window_position_y: i32 = -1,
     draw_fps: bool = false,
     background_color: u32 = 0x000000ff,
+    typing_persistance_sec: i64 = 5,
     typing_font_size: i32 = 120,
     typing_font_color: u32 = 0x000000ff, // alpha=1
     typing_background_color: u32 = 0x00000080,
@@ -205,6 +206,11 @@ const TypingDisplay = struct {
         } else {
             self.push(key, symbol);
         }
+    }
+
+    pub fn clear(self: *TypingDisplay) void {
+        // clear string_buffer only, do not clear active modifiers
+        self.string_buffer.reset();
     }
 
     fn push(self: *TypingDisplay, key: KeyData, key_symbol: [:0]const u8) void {
@@ -381,6 +387,7 @@ pub const AppState = struct {
     key_press_effect: KeyPressEffect,
     key_pressed_travel: f32,
     background_color: rl.Color,
+    typing_persistance_sec: i64,
     typing_font_size: i32,
     typing_font_color: rl.Color,
     typing_background_color: rl.Color,
@@ -407,6 +414,7 @@ pub const AppState = struct {
             .key_press_effect = KeyPressEffect.fromString(config_data.key_press_effect) orelse KeyPressEffect.move,
             .key_pressed_travel = @divTrunc(KEY_1U_PX, 10) * config_data.key_scale,
             .background_color = rl.Color.fromInt(config_data.background_color),
+            .typing_persistance_sec = config_data.typing_persistance_sec,
             .typing_font_size = config_data.typing_font_size,
             .typing_font_color = rl.Color.fromInt(config_data.typing_font_color),
             .typing_background_color = rl.Color.fromInt(config_data.typing_background_color),
@@ -581,6 +589,15 @@ pub const AppState = struct {
             const index: usize = @intCast(lookup);
             self.key_states[index].pressed = pressed;
         }
+    }
+
+    pub fn showTyping(self: AppState) bool {
+        return self.show_typing and
+            (self.typing_persistance_sec <= 0 or typingDisplayTimeElapsed(self));
+    }
+
+    fn typingDisplayTimeElapsed(self: AppState) bool {
+        return std.time.timestamp() - self.last_char_timestamp <= self.typing_persistance_sec;
     }
 };
 
@@ -910,8 +927,6 @@ pub fn main() !void {
 
     var show_gui = false;
 
-    const typing_persistance_sec = 2;
-
     var typing_display = TypingDisplay{};
 
     var drag_reference_position = rl.getWindowPosition();
@@ -1006,7 +1021,7 @@ pub fn main() !void {
                 inline .background_color, .typing_font_color, .typing_background_color, .key_tint_color => |color| {
                     app_state.updateColor(@tagName(color), app_config.data);
                 },
-                inline .show_typing => |value| {
+                inline .show_typing, .typing_persistance_sec => |value| {
                     const name = @tagName(value);
                     @field(app_state, name) = @field(app_config.data, name);
                 },
@@ -1061,6 +1076,9 @@ pub fn main() !void {
             app_state.updateKeyStates(@intCast(k.keycode), k.pressed);
             typing_display.update(k, app_state.backspace_mode);
         }
+        if (app_state.typing_persistance_sec > 0 and !app_state.typingDisplayTimeElapsed()) {
+            typing_display.clear();
+        }
 
         rl.beginDrawing();
         rl.clearBackground(app_state.background_color);
@@ -1083,8 +1101,7 @@ pub fn main() !void {
             }
         }
 
-        if (app_state.show_typing and
-            std.time.timestamp() - app_state.last_char_timestamp <= typing_persistance_sec) {
+        if (app_state.showTyping()) {
 
             const typing_x_pos: f32 = @floatFromInt(@divTrunc(app_state.window_width, 2));
             const typing_y_pos: f32 = @floatFromInt(@divTrunc(app_state.window_height - app_state.typing_font_size, 2));
