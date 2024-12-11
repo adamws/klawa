@@ -1182,12 +1182,16 @@ pub fn main() !void {
             typing_display.clear();
         }
 
+        const tracy_drawing = tracy.traceNamed(@src(), "drawing");
         rl.beginDrawing();
         rl.clearBackground(app_state.background_color);
 
         const rot = rl.Vector2{ .x = 0, .y = 0 };
 
         if (app_state.show_keyboard) {
+            const tracy_drawing_keyboard = tracy.traceNamed(@src(), "drawing_keyboard");
+            defer tracy_drawing_keyboard.end();
+
             for (app_state.key_states) |k| {
                 var dst = k.dst;
                 if (k.pressed) switch(app_state.key_press_effect) {
@@ -1204,6 +1208,8 @@ pub fn main() !void {
         }
 
         if (app_state.showTyping()) {
+            const tracy_drawing_typing = tracy.traceNamed(@src(), "drawing_typing");
+            defer tracy_drawing_typing.end();
 
             const font_size: f32 = @floatFromInt(app_state.typing_font_size);
 
@@ -1253,6 +1259,7 @@ pub fn main() !void {
             rl.drawFPS(10, 10);
         }
         rl.endDrawing();
+        tracy_drawing.end();
         tracy.frameMark();
         frame += 1;
 
