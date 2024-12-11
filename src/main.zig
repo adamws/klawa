@@ -319,22 +319,6 @@ const TypingDisplay = struct {
 
         var it = self.string_buffer.reverse_iterator();
 
-        // position vector points to top right corner of rightmost glyph to render
-        // must adjust offset based on this glyph width
-        if (it.peek()) |repeated_string| {
-            const repeat = repeated_string.repeat;
-            if (repeat > repeat_indicator_threshold)
-            {
-                const buf: []const u8 = "×";
-                num_codepoints = get_codepoints(buf, &codepoints);
-            }
-            else
-            {
-                num_codepoints = get_codepoints(repeated_string.string, &codepoints);
-            }
-            offset += measure_codepoints(font, font_size, codepoints[num_codepoints-1..num_codepoints]);
-        }
-
         string_render: while (it.next()) |repeated_string| {
             var repeat = repeated_string.repeat;
             if (repeat > repeat_indicator_threshold)
@@ -375,17 +359,20 @@ const TypingDisplay = struct {
         var i: usize = codepoints.len;
         while (i > 0) {
             i -= 1;
+
             const cp: i32 = @intCast(codepoints[i]);
             const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
+
+            const advance: f32 = switch (font.glyphs[glyph_index].advanceX) {
+                0 => font.recs[glyph_index].width * scale_factor,
+                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
+            };
+            offset.* += advance;
 
             const glyph_position = rl.Vector2.init(
                 position.x - offset.*,
                 position.y,
             );
-            const advance: f32 = switch (font.glyphs[glyph_index].advanceX) {
-                0 => font.recs[glyph_index].width * scale_factor,
-                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
-            };
             const offset_x = @as(f32, @floatFromInt(font.glyphs[glyph_index].offsetX));
             const offset_y = @as(f32, @floatFromInt(font.glyphs[glyph_index].offsetY));
 
@@ -406,7 +393,6 @@ const TypingDisplay = struct {
 
             rl.drawTexturePro(font.texture, src_rec, dst_rec, rl.Vector2.init(0, 0), 0, tint);
 
-            offset.* += advance;
             number_of_rendered += 1;
         }
 

@@ -66,23 +66,14 @@ pub fn CountingStringRingBuffer(comptime capacity: comptime_int, comptime max_st
 
             pub fn next(it: *ReverseIterator) ?RepeatedStrig {
                 it.count = it.count -% 1;
-                return get(it, it.count);
-            }
+                if (it.count == it.queue.write_index) return null;
 
-            pub fn peek(it: *ReverseIterator) ?RepeatedStrig {
-                const index = it.count -% 1;
-                return get(it, index);
-            }
-
-            fn get(it: *ReverseIterator, index: Index) ?RepeatedStrig {
-                if (index == it.queue.write_index) return null;
-
-                const length: usize = @intCast(it.queue.lengths[index]);
+                const length: usize = @intCast(it.queue.lengths[it.count]);
                 if (length == 0) return null;
 
                 return .{
-                   .repeat = it.queue.repeats[index],
-                   .string = it.queue.strings[index][0..it.queue.lengths[index]],
+                   .repeat = it.queue.repeats[it.count],
+                   .string = it.queue.strings[it.count][0..it.queue.lengths[it.count]],
                 };
             }
         };
