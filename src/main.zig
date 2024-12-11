@@ -254,20 +254,15 @@ const TypingDisplay = struct {
         return null;
     }
 
-    pub fn render(self: *TypingDisplay, font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color) void {
+    pub fn measure(self: *TypingDisplay, font: rl.Font, font_size: f32, max_width: f32) f32 {
         var codepoints: [max_string_len]u21 = undefined;
         var num_codepoints: usize = 0;
 
-        const index_of_w: usize = @intCast(rl.getGlyphIndex(font, 'w'));
-        const wide_glyph_width = 2 * font.recs[index_of_w].width;
+        var width: f32 = 0;
 
-        var offset: f32 = 0;
         var it = self.string_buffer.reverse_iterator();
 
         while (it.next()) |repeated_string| {
-            // to avoid iterating over characters which won't fit in screen anyway
-            if (position.x - offset + wide_glyph_width < 0) break;
-
             var repeat = repeated_string.repeat;
             if (repeat > repeat_indicator_threshold)
             {
@@ -275,14 +270,89 @@ const TypingDisplay = struct {
                 const res = std.fmt.bufPrintZ(&buf, "…{}×", .{repeat}) catch max_repeat_indicator;
 
                 num_codepoints = get_codepoints(res, &codepoints);
-                render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+                width += measure_codepoints(font, font_size, codepoints[0..num_codepoints]);
+                if (width > max_width) {
+                    width = max_width;
+                    break;
+                }
+
+                repeat = repeat_indicator_threshold;
+            }
+
+            num_codepoints = get_codepoints(repeated_string.string, &codepoints);
+            width += @as(f32, @floatFromInt(repeat)) * measure_codepoints(font, font_size, codepoints[0..num_codepoints]);
+            if (width > max_width) {
+                width = max_width;
+                break;
+            }
+        }
+
+        return width;
+    }
+
+    fn measure_codepoints(font: rl.Font, font_size: f32, codepoints: []u21) f32 {
+        var width: f32 = 0;
+        const scale_factor: f32 = font_size / @as(f32, @floatFromInt(font.baseSize));
+
+        var i: usize = codepoints.len;
+        while (i > 0) {
+            i -= 1;
+            const cp: i32 = @intCast(codepoints[i]);
+            const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
+
+            const advance: f32 = switch (font.glyphs[glyph_index].advanceX) {
+                0 => font.recs[glyph_index].width * scale_factor,
+                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
+            };
+
+            width += advance;
+        }
+        return width;
+    }
+
+    pub fn render(self: *TypingDisplay, position: rl.Vector2, font: rl.Font, font_size: f32, tint: rl.Color) void {
+        var codepoints: [max_string_len]u21 = undefined;
+        var num_codepoints: usize = 0;
+        var rendered_codepoints: usize = 0;
+
+        var offset: f32 = 0;
+
+        var it = self.string_buffer.reverse_iterator();
+
+        // position vector points to top right corner of rightmost glyph to render
+        // must adjust offset based on this glyph width
+        if (it.peek()) |repeated_string| {
+            const repeat = repeated_string.repeat;
+            if (repeat > repeat_indicator_threshold)
+            {
+                const buf: []const u8 = "×";
+                num_codepoints = get_codepoints(buf, &codepoints);
+            }
+            else
+            {
+                num_codepoints = get_codepoints(repeated_string.string, &codepoints);
+            }
+            offset += measure_codepoints(font, font_size, codepoints[num_codepoints-1..num_codepoints]);
+        }
+
+        string_render: while (it.next()) |repeated_string| {
+            var repeat = repeated_string.repeat;
+            if (repeat > repeat_indicator_threshold)
+            {
+                var buf: [max_repeat_indicator.len]u8 = undefined;
+                const res = std.fmt.bufPrintZ(&buf, "…{}×", .{repeat}) catch max_repeat_indicator;
+
+                num_codepoints = get_codepoints(res, &codepoints);
+                rendered_codepoints = render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+                if (num_codepoints != rendered_codepoints) break :string_render; // no more fit on screen
 
                 repeat = repeat_indicator_threshold;
             }
 
             num_codepoints = get_codepoints(repeated_string.string, &codepoints);
             for (0..repeat) |_| {
-                render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+                rendered_codepoints = render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+                if (num_codepoints != rendered_codepoints) break :string_render; // no more fit on screen
             }
         }
     }
@@ -298,7 +368,8 @@ const TypingDisplay = struct {
         return i;
     }
 
-    fn render_codepoints(font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color, codepoints: []u21, offset: *f32) void {
+    fn render_codepoints(font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color, codepoints: []u21, offset: *f32) usize {
+        var number_of_rendered: usize = 0;
         const scale_factor: f32 = font_size / @as(f32, @floatFromInt(font.baseSize));
 
         var i: usize = codepoints.len;
@@ -306,18 +377,42 @@ const TypingDisplay = struct {
             i -= 1;
             const cp: i32 = @intCast(codepoints[i]);
             const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
+
             const glyph_position = rl.Vector2.init(
                 position.x - offset.*,
                 position.y,
             );
-            rl.drawTextCodepoint(font, cp, glyph_position, font_size, tint);
-
-            offset.* += switch (font.glyphs[glyph_index].advanceX) {
+            const advance: f32 = switch (font.glyphs[glyph_index].advanceX) {
                 0 => font.recs[glyph_index].width * scale_factor,
                 else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
             };
+            const offset_x = @as(f32, @floatFromInt(font.glyphs[glyph_index].offsetX));
+            const offset_y = @as(f32, @floatFromInt(font.glyphs[glyph_index].offsetY));
+
+            const src_rec: rl.Rectangle = .{
+                .x = font.recs[glyph_index].x,
+                .y = font.recs[glyph_index].y,
+                .width = font.recs[glyph_index].width,
+                .height = font.recs[glyph_index].height,
+            };
+            const dst_rec: rl.Rectangle = .{
+                .x = glyph_position.x + offset_x * scale_factor,
+                .y = glyph_position.y + offset_y * scale_factor,
+                .width = font.recs[glyph_index].width * scale_factor,
+                .height = font.recs[glyph_index].height * scale_factor,
+            };
+
+            if (dst_rec.x + dst_rec.width < 0) break; // entire glyph out of screen
+
+            rl.drawTexturePro(font.texture, src_rec, dst_rec, rl.Vector2.init(0, 0), 0, tint);
+
+            offset.* += advance;
+            number_of_rendered += 1;
         }
+
+        return number_of_rendered;
     }
+
 };
 
 const KeyDataProducer = struct {
@@ -371,8 +466,11 @@ const text = @embedFile("resources/utf8_sequence_0-0xfff_assigned_printable_unse
 const symbols = "↚↹⏎␣⌫↑←→↓ᴷᴾ⏎…×";
 const all_text = text ++ symbols;
 
-// it contains all current sumstitutions symbols:
-// TODO: font discovery with fallbacks when glyph not found
+// draw various lines helping with rendering debugging and position adjustments
+const debug_lines = false;
+
+// it contains all current substitutions symbols:
+// TODO: font discovery with fallback when glyph not found
 // TODO: support for non-monospaced fonts
 const font_data = @embedFile("resources/DejaVuSansMono.ttf");
 
@@ -928,6 +1026,7 @@ pub fn main() !void {
     var show_gui = false;
 
     var typing_display = TypingDisplay{};
+    var typing_display_width: f32 = 0;
 
     var drag_reference_position = rl.getWindowPosition();
 
@@ -1075,6 +1174,9 @@ pub fn main() !void {
 
             app_state.updateKeyStates(@intCast(k.keycode), k.pressed);
             typing_display.update(k, app_state.backspace_mode);
+
+            const typing_max_width = 0.95 * @as(f32, @floatFromInt(app_state.window_width));
+            typing_display_width = typing_display.measure(font, @floatFromInt(app_state.typing_font_size), typing_max_width);
         }
         if (app_state.typing_persistance_sec > 0 and !app_state.typingDisplayTimeElapsed()) {
             typing_display.clear();
@@ -1103,8 +1205,11 @@ pub fn main() !void {
 
         if (app_state.showTyping()) {
 
+            const font_size: f32 = @floatFromInt(app_state.typing_font_size);
+
             const typing_x_pos: f32 = @floatFromInt(@divTrunc(app_state.window_width, 2));
             const typing_y_pos: f32 = @floatFromInt(@divTrunc(app_state.window_height - app_state.typing_font_size, 2));
+
             rl.drawRectangle(
                 0,
                 @intFromFloat(typing_y_pos),
@@ -1113,7 +1218,18 @@ pub fn main() !void {
                 app_state.typing_background_color,
             );
 
-            typing_display.render(font, rl.Vector2.init(typing_x_pos, typing_y_pos), @floatFromInt(app_state.typing_font_size), app_state.typing_font_color);
+            const text_center_bounds = rl.Rectangle.init(
+                typing_x_pos - typing_display_width / 2,
+                typing_y_pos,
+                typing_display_width,
+                font_size
+            );
+            if (debug_lines) {
+                rl.drawRectangleLinesEx(text_center_bounds, 2, rl.Color.blue);
+            }
+
+            const position = rl.Vector2.init(text_center_bounds.x + text_center_bounds.width, text_center_bounds.y);
+            typing_display.render(position, font, font_size, app_state.typing_font_color);
         }
 
         // button for closing application when window decorations disabled,
@@ -1127,6 +1243,10 @@ pub fn main() !void {
             if (1 == rgui.guiButton(button_rect, "#113#")) {
                 exit_window = true;
             }
+        }
+
+        if (debug_lines) {
+            drawCenterCrosshair();
         }
 
         if (app_config.data.draw_fps) {
@@ -1162,3 +1282,11 @@ pub fn main() !void {
     std.debug.print("Main thread exit\n", .{});
 }
 
+fn drawCenterCrosshair() void {
+    const w = rl.getScreenWidth();
+    const w_half = @divFloor(w, 2);
+    const h = rl.getScreenHeight();
+    const h_half = @divFloor(h, 2);
+    rl.drawLine(0, h_half, w, h_half, rl.Color.red);
+    rl.drawLine(w_half, 0, w_half, h, rl.Color.red);
+}
