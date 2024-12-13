@@ -254,7 +254,7 @@ const TypingDisplay = struct {
         return null;
     }
 
-    pub fn measure(self: *TypingDisplay, font: rl.Font, font_size: f32, max_width: f32) f32 {
+    pub fn measure(self: *TypingDisplay, fonts: Fonts, max_width: f32) f32 {
         var codepoints: [max_string_len]u21 = undefined;
         var num_codepoints: usize = 0;
 
@@ -270,7 +270,7 @@ const TypingDisplay = struct {
                 const res = std.fmt.bufPrintZ(&buf, "…{}×", .{repeat}) catch max_repeat_indicator;
 
                 num_codepoints = get_codepoints(res, &codepoints);
-                width += measure_codepoints(font, font_size, codepoints[0..num_codepoints]);
+                width += measure_codepoints(fonts.subscript_font, codepoints[0..num_codepoints]);
                 if (width > max_width) {
                     width = max_width;
                     break;
@@ -280,7 +280,7 @@ const TypingDisplay = struct {
             }
 
             num_codepoints = get_codepoints(repeated_string.string, &codepoints);
-            width += @as(f32, @floatFromInt(repeat)) * measure_codepoints(font, font_size, codepoints[0..num_codepoints]);
+            width += @as(f32, @floatFromInt(repeat)) * measure_codepoints(fonts.regular_font, codepoints[0..num_codepoints]);
             if (width > max_width) {
                 width = max_width;
                 break;
@@ -290,9 +290,8 @@ const TypingDisplay = struct {
         return width;
     }
 
-    fn measure_codepoints(font: rl.Font, font_size: f32, codepoints: []u21) f32 {
+    fn measure_codepoints(font: rl.Font, codepoints: []u21) f32 {
         var width: f32 = 0;
-        const scale_factor: f32 = font_size / @as(f32, @floatFromInt(font.baseSize));
 
         var i: usize = codepoints.len;
         while (i > 0) {
@@ -301,8 +300,8 @@ const TypingDisplay = struct {
             const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
 
             const advance: f32 = switch (font.glyphs[glyph_index].advanceX) {
-                0 => font.recs[glyph_index].width * scale_factor,
-                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
+                0 => font.recs[glyph_index].width,
+                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)),
             };
 
             width += advance;
@@ -310,7 +309,7 @@ const TypingDisplay = struct {
         return width;
     }
 
-    pub fn render(self: *TypingDisplay, position: rl.Vector2, font: rl.Font, font_size: f32, tint: rl.Color) void {
+    pub fn render(self: *TypingDisplay, position: rl.Vector2, fonts: Fonts, tint: rl.Color) void {
         var codepoints: [max_string_len]u21 = undefined;
         var num_codepoints: usize = 0;
         var rendered_codepoints: usize = 0;
@@ -327,7 +326,11 @@ const TypingDisplay = struct {
                 const res = std.fmt.bufPrintZ(&buf, "…{}×", .{repeat}) catch max_repeat_indicator;
 
                 num_codepoints = get_codepoints(res, &codepoints);
-                rendered_codepoints = render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+                const subscript_position = rl.Vector2.init(
+                    position.x,
+                    position.y + @as(f32, @floatFromInt(fonts.regular_font.baseSize - fonts.subscript_font.baseSize))
+                );
+                rendered_codepoints = render_codepoints(fonts.subscript_font, subscript_position, tint, codepoints[0..num_codepoints], &offset);
                 if (num_codepoints != rendered_codepoints) break :string_render; // no more fit on screen
 
                 repeat = repeat_indicator_threshold;
@@ -335,7 +338,7 @@ const TypingDisplay = struct {
 
             num_codepoints = get_codepoints(repeated_string.string, &codepoints);
             for (0..repeat) |_| {
-                rendered_codepoints = render_codepoints(font, position, font_size, tint, codepoints[0..num_codepoints], &offset);
+                rendered_codepoints = render_codepoints(fonts.regular_font, position, tint, codepoints[0..num_codepoints], &offset);
                 if (num_codepoints != rendered_codepoints) break :string_render; // no more fit on screen
             }
         }
@@ -352,9 +355,8 @@ const TypingDisplay = struct {
         return i;
     }
 
-    fn render_codepoints(font: rl.Font, position: rl.Vector2, font_size: f32, tint: rl.Color, codepoints: []u21, offset: *f32) usize {
+    fn render_codepoints(font: rl.Font, position: rl.Vector2, tint: rl.Color, codepoints: []u21, offset: *f32) usize {
         var number_of_rendered: usize = 0;
-        const scale_factor: f32 = font_size / @as(f32, @floatFromInt(font.baseSize));
 
         var i: usize = codepoints.len;
         while (i > 0) {
@@ -364,8 +366,8 @@ const TypingDisplay = struct {
             const glyph_index: usize = @intCast(rl.getGlyphIndex(font, cp));
 
             const advance: f32 = switch (font.glyphs[glyph_index].advanceX) {
-                0 => font.recs[glyph_index].width * scale_factor,
-                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)) * scale_factor,
+                0 => font.recs[glyph_index].width,
+                else => @as(f32, @floatFromInt(font.glyphs[glyph_index].advanceX)),
             };
             offset.* += advance;
 
@@ -383,10 +385,10 @@ const TypingDisplay = struct {
                 .height = font.recs[glyph_index].height,
             };
             const dst_rec: rl.Rectangle = .{
-                .x = glyph_position.x + offset_x * scale_factor,
-                .y = glyph_position.y + offset_y * scale_factor,
-                .width = font.recs[glyph_index].width * scale_factor,
-                .height = font.recs[glyph_index].height * scale_factor,
+                .x = glyph_position.x + offset_x,
+                .y = glyph_position.y + offset_y,
+                .width = font.recs[glyph_index].width,
+                .height = font.recs[glyph_index].height,
             };
 
             if (dst_rec.x + dst_rec.width < 0) break; // entire glyph out of screen
@@ -446,19 +448,66 @@ fn getDataForFrame(frame: usize) !?KeyData {
 var key_data_producer: ?KeyDataProducer = null;
 pub var app_state: AppState = undefined;
 
-// https://github.com/bits/UTF-8-Unicode-Test-Documents/blob/master/UTF-8_sequence_unseparated/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt
-const text = @embedFile("resources/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt");
-
-const symbols = "↚↹⏎␣⌫↑←→↓ᴷᴾ⏎…×";
-const all_text = text ++ symbols;
-
 // draw various lines helping with rendering debugging and position adjustments
 const debug_lines = false;
 
 // it contains all current substitutions symbols:
 // TODO: font discovery with fallback when glyph not found
-// TODO: support for non-monospaced fonts
-const font_data = @embedFile("resources/DejaVuSansMono.ttf");
+const Fonts = struct {
+    regular_codepoints: []i32,
+    regular_font: rl.Font,
+    subscript_codepoints: []i32,
+    subscript_font: rl.Font,
+
+    const font_data = @embedFile("resources/DejaVuSansMono.ttf");
+
+    // https://github.com/bits/UTF-8-Unicode-Test-Documents/blob/master/UTF-8_sequence_unseparated/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt
+    const text = @embedFile("resources/utf8_sequence_0-0xfff_assigned_printable_unseparated.txt");
+    const all_symbols = text ++ "↚↹⏎␣⌫↑←→↓ᴷᴾ⏎…×";
+
+    // letters are not used but are added to string to artificial increase atlas size,
+    // packing does not work well for small sizes,
+    // see: https://github.com/raysan5/raylib/issues/2550
+    const subscript_symbols: [:0]const u8 = "…0123456789×" ++ "abcdefghijklmnopqrstuvwyxz";
+
+    const subscript_scale_factor = 0.58;
+
+    pub fn init(font_size: i32) !Fonts {
+        const regular_codepoints = try rl.loadCodepoints(all_symbols);
+        const subscript_codepoints = try rl.loadCodepoints(subscript_symbols);
+
+        return .{
+            .regular_codepoints = regular_codepoints,
+            .regular_font = loadFont(font_size, regular_codepoints),
+            .subscript_codepoints = subscript_codepoints,
+            .subscript_font = loadFont(subscriptFontSize(font_size), subscript_codepoints),
+        };
+    }
+
+    fn loadFont(font_size: i32, font_chars: []i32) rl.Font {
+        return rl.loadFontFromMemory(".ttf", font_data, font_size, font_chars);
+    }
+
+    fn subscriptFontSize(font_size: i32) i32 {
+        return @intFromFloat(subscript_scale_factor * @as(f32, @floatFromInt(font_size)));
+    }
+
+    pub fn updateSize(self: *Fonts, font_size: i32) void {
+        rl.unloadFont(self.regular_font);
+        rl.unloadFont(self.subscript_font);
+        self.regular_font = loadFont(font_size, self.regular_codepoints);
+        self.subscript_font = loadFont(subscriptFontSize(font_size), self.subscript_codepoints);
+    }
+
+    pub fn deinit(self: *Fonts) void {
+        rl.unloadCodepoints(self.regular_codepoints);
+        rl.unloadCodepoints(self.subscript_codepoints);
+        rl.unloadFont(self.regular_font);
+        rl.unloadFont(self.subscript_font);
+        self.* = undefined;
+    }
+
+};
 
 pub const AppState = struct {
     key_states: [MAX_KEYS]KeyOnScreen,
@@ -998,16 +1047,9 @@ pub fn main() !void {
         return;
     }
 
-    // TODO: implement font discovery
-    // TODO: if not found fallback to default
-    const codepoints = try rl.loadCodepoints(all_text);
-    defer rl.unloadCodepoints(codepoints);
-
-    std.debug.print("Text contains {} codepoints\n", .{codepoints.len});
-
     // TODO: font should be configurable
-    var font = rl.loadFontFromMemory(".ttf", font_data, app_state.typing_font_size, codepoints);
-    defer rl.unloadFont(font);
+    var font = try Fonts.init(app_state.typing_font_size);
+    defer font.deinit();
 
     var show_gui = false;
 
@@ -1098,9 +1140,8 @@ pub fn main() !void {
                     }
                 },
                 .typing_font_size => {
-                    rl.unloadFont(font);
                     // TODO: sanitize, sizes <0 and larger than window height probably should be skipped
-                    font = rl.loadFontFromMemory(".ttf", font_data, app_config.data.typing_font_size, codepoints);
+                    font.updateSize(app_config.data.typing_font_size);
                     app_state.typing_font_size = app_config.data.typing_font_size;
                 },
                 inline .background_color, .typing_font_color, .typing_background_color, .key_tint_color => |color| {
@@ -1162,7 +1203,7 @@ pub fn main() !void {
             typing_display.update(k, app_state.backspace_mode);
 
             const typing_max_width = 0.95 * @as(f32, @floatFromInt(app_state.window_width));
-            typing_display_width = typing_display.measure(font, @floatFromInt(app_state.typing_font_size), typing_max_width);
+            typing_display_width = typing_display.measure(font, typing_max_width);
         }
         if (app_state.typing_persistance_sec > 0 and !app_state.typingDisplayTimeElapsed()) {
             typing_display.clear();
@@ -1221,7 +1262,7 @@ pub fn main() !void {
             }
 
             const position = rl.Vector2.init(text_center_bounds.x + text_center_bounds.width, text_center_bounds.y);
-            typing_display.render(position, font, font_size, app_state.typing_font_color);
+            typing_display.render(position, font, app_state.typing_font_color);
         }
 
         // button for closing application when window decorations disabled,
